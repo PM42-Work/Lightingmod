@@ -166,7 +166,11 @@ class LIGHTINGMOD_PT_export(bpy.types.Panel):
     def draw(self, context):
         sc=context.scene; layout=self.layout
         layout.prop(sc,"export_folder",text="CSV Folder")
-        layout.operator("lightingmod.export_csv_colors",text="Overwrite CSV Colors")
+        
+        col = layout.column(align=True)
+        col.operator("lightingmod.export_csv_colors", text="Overwrite CSV Colors", icon='FILE_TEXT')
+        col.operator("lightingmod.export_color_transfer", text="Export Colour Transfer", icon='EXPORT')
+
 
 classes = (
     LIGHTINGMOD_UL_layers, LIGHTINGMOD_UL_effector_colors,

@@ -3,7 +3,6 @@ import numpy as np
 import os
 import sys
 
-
 # Import File Browser Helper
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty
@@ -18,13 +17,14 @@ except ImportError:
 class LIGHTINGMOD_OT_generate_uv(bpy.types.Operator):
     bl_idname = "lightingmod.generate_uv"
     bl_label  = "Add & Activate UV Map"
+    
     def execute(self, context):
         name = context.scene.new_uv_map_name.strip()
         if not name:
             self.report({'ERROR'}, "Enter a UV Map Name")
             return {'CANCELLED'}
         for obj in context.selected_objects:
-            if obj.type!='MESH': continue
+            if obj.type != 'MESH': continue
             uvl = obj.data.uv_layers
             if name not in uvl: uvl.new(name=name)
             uvl.active = uvl[name]
@@ -37,7 +37,7 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator, ImportHelper):
     bl_label  = "Sample Video File"
     bl_options = {'REGISTER', 'UNDO'}
     
-    # ImportHelper props
+    # ImportHelper props (Configures the file browser)
     filter_glob: StringProperty(
         default="*.mp4;*.mov;*.avi;*.mkv;*.webm",
         options={'HIDDEN'},
@@ -45,11 +45,13 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator, ImportHelper):
     )
 
     def invoke(self, context, event):
-        # Open the standard Blender File Browser
+        # --- THE FIX IS HERE ---
+        # Do NOT put 'return' in front of fileselect_add. 
+        # It returns None, but Blender expects a Set.
         context.window_manager.fileselect_add(self)
-        # Alternatively, for full screen file browser:
-        # context.window_manager.fileselect_add(self)
-        # return {'RUNNING_MODAL'}
+        
+        # We manually return the status telling Blender "The modal window is running"
+        return {'RUNNING_MODAL'}
 
     def execute(self, context):
         # 1. CHECK DEPENDENCIES
@@ -129,12 +131,9 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator, ImportHelper):
 
         # 5. PROCESS VIDEO (Memory Only)
         self.report({'INFO'}, "Processing Video...")
-        # Since this is synchronous, the UI will hang briefly. 
-        # For a few seconds of processing, this is acceptable and safer.
         
         for target_frame in frames:
             # Map Timeline Frame to Video Frame (assuming sync start at 0)
-            # You can add an offset property here if needed.
             video_frame = max(0, target_frame - 1)
             
             cap.set(cv2.CAP_PROP_POS_FRAMES, video_frame)
