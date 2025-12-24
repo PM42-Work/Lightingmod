@@ -1,4 +1,4 @@
-from . import gradient, sparkle, domain, movie, offset, management
+from . import gradient, sparkle, domain, movie, offset, management, temporal
 
 classes = (
     gradient.LIGHTINGMOD_OT_draw_gradient,
@@ -20,6 +20,10 @@ classes = (
     management.LIGHTINGMOD_OT_effector_monochrome,
     management.LIGHTINGMOD_OT_set_start_frame,
     management.LIGHTINGMOD_OT_set_end_frame,
+    
+    temporal.LIGHTINGMOD_OT_temporal_sparkle,
+    temporal.LIGHTINGMOD_OT_stage_add,
+    temporal.LIGHTINGMOD_OT_stage_remove,
 )
 
 def register():

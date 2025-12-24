@@ -41,11 +41,20 @@ def register():
     sc.batch_target_layer = EnumProperty(name="Target Layer",items=get_layer_items)
     
     sc.effector_target_layer = EnumProperty(name="Target Layer",items=get_layer_items)
+    
+    # NEW: Selection Mode
+    sc.effector_selection_mode = EnumProperty(
+        name="Target",
+        items=[('SELECTED', "Selected Objects", ""), ('GROUP', "Active Group", "")],
+        default='SELECTED'
+    )
+
     sc.effector_type = EnumProperty(
         name="Type",
         items=[
           ('GRADIENT','Gradient',''),
           ('SPARKLE','Sparkle',''),
+          ('TEMPORAL_SPARKLE','Temporal Sparkle',''),
           ('DOMAIN','Domain',''),
           ('MOVIE','Movie UV',''),
           ('OFFSET','Offset',''),
@@ -70,19 +79,31 @@ def register():
     sc.movie_step = IntProperty(name="Step", default=1, min=1)
     sc.image_texture = PointerProperty(name="Image", type=bpy.types.Image)
 
+    # NEW: Curve & Split Modes
     sc.gradient_mode = EnumProperty(
         name="Mode",
         items=[
           ('LINEAR','Linear',''),
+          ('SPLIT','Split Linear',''),
           ('RADIAL_2D','2D Radial',''),
           ('RADIAL_3D','3D Radial',''),
+          ('CURVE','Curve',''),
         ], default='LINEAR'
     )
     sc.gradient_ng = PointerProperty(type=bpy.types.NodeTree)
+    sc.curve_object = PointerProperty(name="Curve", type=bpy.types.Object)
+    sc.curve_radius = FloatProperty(name="Radius", default=0.5)
+    sc.curve_mode   = EnumProperty(items=[('PER_CURVE', 'Each Curve 0-1', ''), ('GLOBAL', 'Relative to Longest', '')], default='PER_CURVE')
     
     sc.offset_line_start = FloatVectorProperty(name="Offset Line Start", size=3, subtype='XYZ', default=(0.0, 0.0, 0.0))
     sc.offset_line_end = FloatVectorProperty(name="Offset Line End", size=3, subtype='XYZ', default=(0.0, 0.0, 0.0))
     sc.export_folder = StringProperty(name="Export Folder", subtype='DIR_PATH', default="//")
+
+    # NEW: Collections
+    sc.drone_formations = CollectionProperty(type=properties.LightingModFormation)
+    sc.drone_formations_index = IntProperty()
+    sc.temporal_stages = CollectionProperty(type=properties.LightingModTemporalStage)
+    sc.temporal_stages_index = IntProperty()
 
     # Init Filter
     try:
@@ -101,6 +122,7 @@ def unregister():
     del bpy.types.Scene.batch_secondary_color
     del bpy.types.Scene.batch_target_layer
     del bpy.types.Scene.effector_target_layer
+    del bpy.types.Scene.effector_selection_mode
     del bpy.types.Scene.effector_type
     del bpy.types.Scene.effector_start
     del bpy.types.Scene.effector_end
@@ -117,9 +139,16 @@ def unregister():
     del bpy.types.Scene.image_texture
     del bpy.types.Scene.gradient_mode
     del bpy.types.Scene.gradient_ng
+    del bpy.types.Scene.curve_object
+    del bpy.types.Scene.curve_radius
+    del bpy.types.Scene.curve_mode
     del bpy.types.Scene.offset_line_start
     del bpy.types.Scene.offset_line_end
     del bpy.types.Scene.export_folder
+    del bpy.types.Scene.drone_formations
+    del bpy.types.Scene.drone_formations_index
+    del bpy.types.Scene.temporal_stages
+    del bpy.types.Scene.temporal_stages_index
 
 if __name__ == "__main__":
     register()

@@ -3,7 +3,7 @@ import mathutils
 from bpy.props import FloatVectorProperty, IntProperty
 from bpy_extras import view3d_utils
 from ... import utils
-from .evaluator import EffectorEvaluator # <--- NEW IMPORT
+from .evaluator import EffectorEvaluator
 
 class LIGHTINGMOD_OT_draw_offset_line(bpy.types.Operator):
     bl_idname = "lightingmod.draw_offset_line"
@@ -51,17 +51,29 @@ class LIGHTINGMOD_OT_offset_keyframes(bpy.types.Operator):
     bl_label  = "Offset Keyframes"
     def execute(self, context):
         sc = context.scene
-        dur = sc.effector_duration
         
-        # --- NEW LOGIC USING EVALUATOR ---
-        evaluator = EffectorEvaluator(context, sc.gradient_mode, sc.offset_line_start, sc.offset_line_end)
+        # Init Evaluator
+        evaluator = EffectorEvaluator(context, sc.gradient_mode, sc.offset_line_start, sc.offset_line_end,
+                                      sc.curve_object, sc.curve_radius, sc.curve_mode)
 
-        for obj in context.selected_objects:
+        # Collect Objects (Selection OR Group)
+        objs = []
+        if sc.effector_selection_mode == 'GROUP' and sc.drone_formations:
+             if sc.drone_formations[sc.drone_formations_index].groups:
+                 g = sc.drone_formations[sc.drone_formations_index].groups[sc.drone_formations[sc.drone_formations_index].groups_index]
+                 objs = [bpy.data.objects.get(d.object_name) for d in g.drones if bpy.data.objects.get(d.object_name)]
+        else:
+             objs = context.selected_objects
+
+        moved = False
+        for obj in objs:
             if not (obj.get("md_sphere") and obj.type=='MESH'): continue
             
-            # Get t from the common evaluator
-            t = evaluator.get_t(obj.matrix_world.to_translation())
-            offs = t * dur
+            # Get t from common evaluator
+            t, valid = evaluator.get_t(obj.matrix_world.to_translation())
+            if not valid: continue
+            
+            offs = t * sc.effector_duration
 
             ad = obj.animation_data
             if not ad or not ad.action: continue
@@ -73,4 +85,10 @@ class LIGHTINGMOD_OT_offset_keyframes(bpy.types.Operator):
                     kp.co.x           += offs
                     kp.handle_left.x  += offs
                     kp.handle_right.x += offs
+                    moved = True
+        
+        if not moved:
+            self.report({'WARNING'}, "No keyframes moved (ensure you have keyframes selected in graph editor)")
+            return {'CANCELLED'}
+            
         return {'FINISHED'}

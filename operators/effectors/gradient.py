@@ -3,7 +3,7 @@ import mathutils
 from bpy.props import FloatVectorProperty, IntProperty
 from bpy_extras import view3d_utils
 from ... import utils
-from .evaluator import EffectorEvaluator  # <--- NEW IMPORT
+from .evaluator import EffectorEvaluator
 
 class LIGHTINGMOD_OT_create_gradient_nodegroup(bpy.types.Operator):
     bl_idname = "lightingmod.create_gradient_nodegroup"
@@ -73,16 +73,25 @@ class LIGHTINGMOD_OT_draw_gradient(bpy.types.Operator):
         layer_idx = int(sc.effector_target_layer) + 1
         prop = f"Layer_{layer_idx}"
         
-        # --- NEW LOGIC USING EVALUATOR ---
-        evaluator = EffectorEvaluator(context, sc.gradient_mode, self.first, self.second)
+        # Init Evaluator (Handles Curve, Split, etc.)
+        evaluator = EffectorEvaluator(context, sc.gradient_mode, self.first, self.second, 
+                                      sc.curve_object, sc.curve_radius, sc.curve_mode)
 
-        objs = context.selected_objects if sc.effector_selected_only else bpy.data.objects
+        # Collect Objects (Selection OR Group)
+        objs = []
+        if sc.effector_selection_mode == 'GROUP' and sc.drone_formations:
+             if sc.drone_formations[sc.drone_formations_index].groups:
+                 g = sc.drone_formations[sc.drone_formations_index].groups[sc.drone_formations[sc.drone_formations_index].groups_index]
+                 objs = [bpy.data.objects.get(d.object_name) for d in g.drones if bpy.data.objects.get(d.object_name)]
+        else:
+             objs = [o for o in (context.selected_objects if sc.effector_selected_only else bpy.data.objects) if o.get("md_sphere") and o.type=='MESH']
+
         for obj in objs:
-            if not (obj.get("md_sphere") and obj.type=='MESH'): continue
             if prop not in obj.keys(): continue
 
-            # Get t from the common evaluator
-            t = evaluator.get_t(obj.matrix_world.to_translation())
+            t, valid = evaluator.get_t(obj.matrix_world.to_translation())
+            if not valid: continue
+            
             r, g, b, a = ramp.evaluate(t)
             
             base = obj[prop]

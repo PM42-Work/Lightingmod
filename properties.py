@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import (StringProperty, EnumProperty, FloatProperty, BoolProperty, FloatVectorProperty)
+from bpy.props import (StringProperty, EnumProperty, FloatProperty, BoolProperty, FloatVectorProperty, CollectionProperty, IntProperty)
 from . import utils
 
 class LightingModLayerItem(bpy.types.PropertyGroup):
@@ -21,9 +21,35 @@ class LightingModEffectorColorItem(bpy.types.PropertyGroup):
         min=0.0, max=1.0, default=(1,1,1,1)
     )
 
+# --- NEW: Temporal Stages ---
+class LightingModTemporalStage(bpy.types.PropertyGroup):
+    name: StringProperty(name="Name", default="Stage")
+    transition: IntProperty(name="Transition", min=1, default=10)
+    influence: FloatProperty(name="Influence", min=0, max=1, default=0.5)
+    colors: CollectionProperty(type=LightingModEffectorColorItem)
+    colors_index: IntProperty(default=0)
+
+# --- NEW: Formations ---
+class LightingModDroneRef(bpy.types.PropertyGroup):
+    object_name: StringProperty(name="Object")
+
+class LightingModDroneGroup(bpy.types.PropertyGroup):
+    name: StringProperty(name="Group Name", default="Group")
+    drones: CollectionProperty(type=LightingModDroneRef)
+    drones_index: IntProperty(default=0)
+
+class LightingModFormation(bpy.types.PropertyGroup):
+    name: StringProperty(name="Formation Name", default="Formation")
+    groups: CollectionProperty(type=LightingModDroneGroup)
+    groups_index: IntProperty(default=0)
+
 classes = (
     LightingModLayerItem,
     LightingModEffectorColorItem,
+    LightingModTemporalStage,
+    LightingModDroneRef,
+    LightingModDroneGroup,
+    LightingModFormation,
 )
 
 def register():
