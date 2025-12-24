@@ -12,6 +12,29 @@ class LIGHTINGMOD_OT_create_gradient_nodegroup(bpy.types.Operator):
         utils.ensure_gradient_nodegroup()
         return {'FINISHED'}
 
+class LIGHTINGMOD_OT_flip_color_ramp(bpy.types.Operator):
+    bl_idname = "lightingmod.flip_color_ramp"
+    bl_label  = "Flip Gradient Colors"
+    bl_description = "Inverts the color ramp (flips 0.0 to 1.0)"
+
+    def execute(self, context):
+        ng = context.scene.gradient_ng
+        if not ng or "Ramp" not in ng.nodes:
+            self.report({'WARNING'}, "Gradient Node Group not found")
+            return {'CANCELLED'}
+        
+        ramp = ng.nodes["Ramp"].color_ramp
+        
+        # Capture a snapshot of elements because changing positions re-sorts the array live
+        snapshot = [e for e in ramp.elements]
+        
+        for e in snapshot:
+            e.position = 1.0 - e.position
+            
+        context.area.tag_redraw()
+        self.report({'INFO'}, "Gradient Ramp Flipped")
+        return {'FINISHED'}
+
 class LIGHTINGMOD_OT_draw_gradient(bpy.types.Operator):
     bl_idname = "lightingmod.draw_gradient"
     bl_label  = "Draw Gradient"

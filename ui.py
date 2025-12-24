@@ -14,7 +14,6 @@ class LIGHTINGMOD_UL_effector_colors(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.prop(item, "color", text="", emboss=True)
 
-# --- NEW UI LISTS ---
 class LIGHTINGMOD_UL_formations(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.prop(item, "name", text="", emboss=False, icon='OUTLINER_COLLECTION')
@@ -111,6 +110,10 @@ class LIGHTINGMOD_PT_panel(bpy.types.Panel):
                 ng = bpy.data.node_groups.get("LightingModGradient")
                 if ng and "Ramp" in ng.nodes: box.template_color_ramp(ng.nodes["Ramp"], "color_ramp")
                 else: box.operator("lightingmod.create_gradient_nodegroup", text="Create Ramp")
+                
+                # --- NEW FLIP BUTTON ---
+                box.operator("lightingmod.flip_color_ramp", icon='FILE_REFRESH', text="Flip Gradient Colors")
+                
                 if sc.gradient_mode != 'CURVE': box.operator("lightingmod.draw_gradient", icon='BRUSH_DATA', text="Draw Gradient")
             else:
                 box.prop(sc, "effector_duration")

@@ -3,6 +3,7 @@ from . import gradient, sparkle, domain, movie, offset, management, temporal
 classes = (
     gradient.LIGHTINGMOD_OT_draw_gradient,
     gradient.LIGHTINGMOD_OT_create_gradient_nodegroup,
+    gradient.LIGHTINGMOD_OT_flip_color_ramp, # <--- NEW
     
     sparkle.LIGHTINGMOD_OT_sparkle_effector,
     
