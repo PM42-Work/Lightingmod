@@ -3,6 +3,7 @@ import mathutils
 from bpy.props import FloatVectorProperty, IntProperty
 from bpy_extras import view3d_utils
 from ... import utils
+from .evaluator import EffectorEvaluator # <--- NEW IMPORT
 
 class LIGHTINGMOD_OT_draw_offset_line(bpy.types.Operator):
     bl_idname = "lightingmod.draw_offset_line"
@@ -49,41 +50,17 @@ class LIGHTINGMOD_OT_offset_keyframes(bpy.types.Operator):
     bl_idname = "lightingmod.offset_keyframes"
     bl_label  = "Offset Keyframes"
     def execute(self, context):
-        from bpy_extras.view3d_utils import location_3d_to_region_2d
-        sc   = context.scene
-        p0   = mathutils.Vector(sc.offset_line_start)
-        p1   = mathutils.Vector(sc.offset_line_end)
-        mode = sc.gradient_mode
-        dur  = sc.effector_duration
-
-        if mode == 'RADIAL_2D':
-            region = context.region
-            rv3d   = context.region_data
-            co0_2d = location_3d_to_region_2d(region, rv3d, p0)
-            co1_2d = location_3d_to_region_2d(region, rv3d, p1) if co0_2d else None
-            radius_2d = (co1_2d - co0_2d).length if (co0_2d and co1_2d) else dur
+        sc = context.scene
+        dur = sc.effector_duration
+        
+        # --- NEW LOGIC USING EVALUATOR ---
+        evaluator = EffectorEvaluator(context, sc.gradient_mode, sc.offset_line_start, sc.offset_line_end)
 
         for obj in context.selected_objects:
             if not (obj.get("md_sphere") and obj.type=='MESH'): continue
-            world_pos = obj.matrix_world.to_translation()
-            if mode == 'LINEAR':
-                vec = p1 - p0
-                denom = vec.dot(vec) or 1.0
-                t = (world_pos - p0).dot(vec) / denom
-            elif mode == 'RADIAL_2D':
-                region = context.region
-                rv3d   = context.region_data
-                co_obj_2d = location_3d_to_region_2d(region, rv3d, world_pos)
-                if co0_2d and co_obj_2d and radius_2d > 0.0:
-                    t = (co_obj_2d - co0_2d).length / radius_2d
-                else:
-                    t = 0.0
-            else:
-                dist = (world_pos - p0).length
-                maxd = (p1 - p0).length or 1.0
-                t = dist / maxd
-
-            t = max(0.0, min(1.0, t))
+            
+            # Get t from the common evaluator
+            t = evaluator.get_t(obj.matrix_world.to_translation())
             offs = t * dur
 
             ad = obj.animation_data
