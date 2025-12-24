@@ -1,4 +1,5 @@
 import bpy
+import numpy as np
 from bpy.props import StringProperty
 from ... import utils
 
@@ -20,31 +21,29 @@ class LIGHTINGMOD_OT_generate_uv(bpy.types.Operator):
 
 class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
     bl_idname = "lightingmod.movie_sampler"
-    bl_label  = "Sample Image"
+    bl_label  = "Sample Image (Bulk)"
     _timer = None
     
-    # State storage
-    temp_scene = None
-    orig_scene = None
-    cached_drone_data = []
-
+    # Data Storage
+    lookup_table = []   # [(obj, pixel_index), ...]
+    drone_data = {}     # {obj_name: [[r,g,b], [r,g,b], ...]}
+    
     def invoke(self, context, event):
         sc = context.scene
         img = sc.image_texture
+        
         if not img:
             self.report({'ERROR'}, "Pick an Image Texture")
             return {'CANCELLED'}
-        
-        # [Corrected] Removed the invalid 'use_auto_refresh' line.
-        # We rely on view_layer.update() in the loop to handle refreshes.
-        
+
         start, end, step = sc.effector_start, sc.effector_end, sc.movie_step
+        if step < 1: step = 1
         self.frames = list(range(start, end + 1, step))
         if not self.frames:
             self.report({'ERROR'}, "No frames to sample")
             return {'CANCELLED'}
             
-        # 1. Identify Drones (Selection or Group)
+        # 1. Identify Drones
         objs = []
         if sc.effector_selection_mode == 'GROUP' and sc.drone_formations:
              if sc.drone_formations[sc.drone_formations_index].groups:
@@ -58,20 +57,33 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
             self.report({'WARNING'}, "No valid drones found")
             return {'CANCELLED'}
 
-        # 2. Setup Image
+        # 2. Image & Props
         self.img = img
         self.w, self.h = img.size
+        if self.w == 0 or self.h == 0:
+            self.report({'ERROR'}, "Image has 0 size.")
+            return {'CANCELLED'}
+            
         self.uv_map_name = sc.movie_uv_map
         self.target_prop = f'Layer_{int(sc.effector_target_layer)+1}'
+        self.target_data_path = f'["{self.target_prop}"]' # e.g. ["Layer_1"]
         
-        # 3. PRE-CALCULATE UVs (Optimization 1)
-        self.cached_drone_data = []
+        # 3. Pre-Calc Pixel Indices (Lookup Table)
+        self.lookup_table = []
+        self.drone_data = {}
+        
+        w_int = int(self.w)
+        h_int = int(self.h)
+        
         for o in self.drones:
             if self.uv_map_name not in o.data.uv_layers: continue
             loops = o.data.uv_layers[self.uv_map_name].data
             if not loops: continue
             
-            # Fast average
+            # Init storage for this drone
+            self.drone_data[o.name] = []
+            
+            # UV Average
             avg_u, avg_v = 0.0, 0.0
             for lp in loops:
                 avg_u += lp.uv[0]
@@ -79,53 +91,97 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
             count = len(loops)
             u = max(0.0, min(1.0, avg_u / count))
             v = max(0.0, min(1.0, avg_v / count))
-            self.cached_drone_data.append((o, u, v))
+            
+            px_x = int(u * (w_int - 1))
+            px_y = int(v * (h_int - 1))
+            
+            # Index = (y * w + x) * 4
+            base_idx = (px_y * w_int + px_x) * 4
+            self.lookup_table.append((o, base_idx))
 
-        if not self.cached_drone_data:
-             self.report({'WARNING'}, f"No drones have UV map '{self.uv_map_name}'")
+        if not self.lookup_table:
+             self.report({'WARNING'}, f"No drones have valid UVs")
              return {'CANCELLED'}
 
-        # 4. GHOST SCENE SETUP (Optimization 2)
-        # We create an empty scene to scrub the timeline. 
-        # This avoids updating the heavy geometry/rigs of the main scene.
-        self.orig_scene = context.scene
-        self.temp_scene = bpy.data.scenes.new("LightingMod_Temp_Bake")
-        
-        # Sync render settings so frame rate matches (crucial for video time calculation)
-        self.temp_scene.render.fps = self.orig_scene.render.fps
-        self.temp_scene.render.fps_base = self.orig_scene.render.fps_base
-        self.temp_scene.frame_start = start
-        self.temp_scene.frame_end = end
-        
-        # Switch context to temp scene
-        context.window.scene = self.temp_scene
-
-        # 5. Start Timer
+        # 4. Start Modal
         self.idx = 0
         wm = context.window_manager
         wm.progress_begin(0, len(self.frames))
+        context.window.cursor_modal_set('WAIT')
         
-        # Fast timer interval
-        self._timer = wm.event_timer_add(0.01, window=context.window)
+        # Fast Timer
+        self._timer = wm.event_timer_add(0.05, window=context.window)
         wm.modal_handler_add(self)
         
+        print(f"--- Sampling Movie: {len(self.frames)} frames ---")
         return {'RUNNING_MODAL'}
 
+    def save_keyframes(self, context):
+        """Bulk write all stored data to F-Curves using NumPy"""
+        print("Writing keyframes to F-Curves...")
+        
+        frames_arr = np.array(self.frames, dtype=np.float32)
+        count = len(frames_arr)
+        
+        # We need an array of [frame, val, frame, val...]
+        # We can pre-allocate the 'frame' part since it's the same for everyone
+        # But we must interleave it per channel.
+        
+        for obj_name, color_data in self.drone_data.items():
+            obj = bpy.data.objects.get(obj_name)
+            if not obj: continue
+            
+            # Ensure Action
+            if not obj.animation_data:
+                obj.animation_data_create()
+            if not obj.animation_data.action:
+                obj.animation_data.action = bpy.data.actions.new(name=f"{obj.name}Action")
+            
+            action = obj.animation_data.action
+            
+            # Convert color list to numpy (frames x 3)
+            # This is a matrix of [[r,g,b], [r,g,b], ...]
+            # If color_data is incomplete (cancelled early), trim frames
+            if len(color_data) != count:
+                print(f"Skipping {obj_name}: Data mismatch")
+                continue
+                
+            colors_np = np.array(color_data, dtype=np.float32) # Shape: (N, 3)
+            
+            # Process R, G, B channels
+            for i in range(3):
+                # 1. Get or Create F-Curve
+                # We try to find existing one to overwrite, or make new
+                fc = action.fcurves.find(data_path=self.target_data_path, index=i)
+                if fc:
+                    # Clear existing points to avoid conflicts
+                    fc.keyframe_points.clear()
+                else:
+                    fc = action.fcurves.new(data_path=self.target_data_path, index=i)
+                
+                # 2. Add empty points
+                fc.keyframe_points.add(count)
+                
+                # 3. Interleave [Frame, Value, Frame, Value...]
+                # Create empty array of size N*2
+                flat_data = np.empty(count * 2, dtype=np.float32)
+                
+                # Fill even indices with frames: 0, 2, 4...
+                flat_data[0::2] = frames_arr
+                # Fill odd indices with color values: 1, 3, 5...
+                flat_data[1::2] = colors_np[:, i]
+                
+                # 4. Fast Set
+                fc.keyframe_points.foreach_set('co', flat_data)
+                
+                # 5. Update Curve
+                fc.update()
+
     def cleanup(self, context):
-        """Restore original state"""
         if self._timer:
             context.window_manager.event_timer_remove(self._timer)
-        
         context.window_manager.progress_end()
-        
-        # Restore Scene
-        if self.orig_scene:
-            context.window.scene = self.orig_scene
-            
-        # Delete Temp Scene
-        if self.temp_scene:
-            bpy.data.scenes.remove(self.temp_scene)
-            self.temp_scene = None
+        context.window.cursor_modal_restore()
 
     def modal(self, context, event):
         if event.type in {'ESC', 'RIGHTMOUSE'}:
@@ -137,68 +193,42 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
             if self.idx < len(self.frames):
                 frame = self.frames[self.idx]
                 
-                # Update the LIGHTWEIGHT temp scene (very fast)
-                self.temp_scene.frame_set(frame)
-                
-                # --- KEY FIX: FORCE DEPENDENCY UPDATE ---
-                # This ensures the Image Texture processes the new frame time.
-                # Without this, 'pixels' will return the cached data from the previous frame.
+                context.scene.frame_set(frame)
                 context.view_layer.update()
                 
                 try:
-                    px = self.img.pixels # This read triggers the buffer fetch
+                    # Fast Pixel Read
+                    raw_pixels = np.empty(self.w * self.h * 4, dtype=np.float32)
+                    self.img.pixels.foreach_get(raw_pixels)
                 except Exception:
-                    # Fallback for some video formats that might lock up
-                    try:
-                        self.img.reload()
-                        px = self.img.pixels
-                    except:
-                        # If image is broken, skip this frame to avoid crash
-                        self.idx += 1
-                        return {'RUNNING_MODAL'}
+                    self.idx += 1
+                    return {'RUNNING_MODAL'}
 
-                w, h = self.w, self.h
-                prop = self.target_prop
-                
-                # Fast Loop using Pre-calculated UVs
-                for o, u, v in self.cached_drone_data:
-                    # Map 0-1 UV to Image Coordinates
-                    xf, yf = u * (w - 1), v * (h - 1)
-                    x0, y0 = int(xf), int(yf)
-                    x1, y1 = min(w - 1, x0 + 1), min(h - 1, y0 + 1)
-                    dx, dy = xf - x0, yf - y0
-                    
-                    # Bilinear Sample Helper
-                    def get_rgb(x, y):
-                        i = (y * w + x) * 4
-                        # Safety check for bounds
-                        if i < 0 or i + 2 >= len(px): return (0,0,0)
-                        return (px[i], px[i+1], px[i+2])
-
-                    try:
-                        c00 = get_rgb(x0, y0); c10 = get_rgb(x1, y0)
-                        c01 = get_rgb(x0, y1); c11 = get_rgb(x1, y1)
-                        
-                        # Interpolate X
-                        r0 = c00[0]*(1-dx) + c10[0]*dx; g0 = c00[1]*(1-dx) + c10[1]*dx; b0 = c00[2]*(1-dx) + c10[2]*dx
-                        r1 = c01[0]*(1-dx) + c11[0]*dx; g1 = c01[1]*(1-dx) + c11[1]*dx; b1 = c01[2]*(1-dx) + c11[2]*dx
-                        
-                        # Interpolate Y
-                        r = r0*(1-dy) + r1*dy
-                        g = g0*(1-dy) + g1*dy
-                        b = b0*(1-dy) + b1*dy
-                        
-                        # Apply to object (Object data persists across scenes)
-                        o[prop] = [r, g, b]
-                        o.keyframe_insert(data_path=f'["{prop}"]', frame=frame)
-                        
-                    except IndexError: continue
+                # Fast Collection (No Writing to Blender API yet)
+                for obj, base_idx in self.lookup_table:
+                    if base_idx + 2 < len(raw_pixels):
+                        r = raw_pixels[base_idx]
+                        g = raw_pixels[base_idx+1]
+                        b = raw_pixels[base_idx+2]
+                        # Append to storage
+                        self.drone_data[obj.name].append((r, g, b))
+                    else:
+                        # Fallback for out of bounds
+                        self.drone_data[obj.name].append((0.0, 0.0, 0.0))
 
                 self.idx += 1
-                context.window_manager.progress_update(self.idx)
+                
+                # Update UI
+                if self.idx % 5 == 0:
+                    context.window_manager.progress_update(self.idx)
+                    print(f"Sampling Frame {self.idx}/{len(self.frames)}")
+                
                 return {'RUNNING_MODAL'}
             
-            # Done
+            # --- FINISHED LOOP ---
+            # Now we write everything at once
+            self.save_keyframes(context)
+            
             self.cleanup(context)
             self.report({'INFO'}, "Movie Bake Complete")
             return {'FINISHED'}
