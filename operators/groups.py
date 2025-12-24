@@ -108,3 +108,22 @@ class LIGHTINGMOD_OT_group_select(bpy.types.Operator):
             if obj:
                 obj.select_set(True)
         return {'FINISHED'}
+
+# --- REGISTRATION ---
+classes = (
+    LIGHTINGMOD_OT_formation_add,
+    LIGHTINGMOD_OT_formation_remove,
+    LIGHTINGMOD_OT_group_add,
+    LIGHTINGMOD_OT_group_remove,
+    LIGHTINGMOD_OT_group_add_selected,
+    LIGHTINGMOD_OT_group_remove_selected,
+    LIGHTINGMOD_OT_group_select,
+)
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+def unregister():
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
