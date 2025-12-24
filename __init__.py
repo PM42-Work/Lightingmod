@@ -15,9 +15,8 @@ import bpy
 
 # Register Dependencies
 current_dir = os.path.dirname(os.path.realpath(__file__))
-system_platform = platform.system().lower() # 'windows', 'linux', or 'darwin'
+system_platform = platform.system().lower() 
 
-# Map platform to folder
 if system_platform == 'windows':
     dep_folder = "win"
 elif system_platform == 'darwin':
@@ -26,11 +25,8 @@ else:
     dep_folder = "linux"
 
 dep_path = os.path.join(current_dir, "dependencies", dep_folder)
-
-# Insert into sys.path
 if dep_path not in sys.path:
     sys.path.insert(0, dep_path)
-# ------------------------
 
 from bpy.props import (StringProperty, EnumProperty, FloatProperty, IntProperty,
                        FloatVectorProperty, CollectionProperty, BoolProperty, PointerProperty)
@@ -65,7 +61,6 @@ def register():
     
     sc.effector_target_layer = EnumProperty(name="Target Layer",items=get_layer_items)
     
-    # NEW: Selection Mode
     sc.effector_selection_mode = EnumProperty(
         name="Target",
         items=[('SELECTED', "Selected Objects", ""), ('GROUP', "Active Group", "")],
@@ -102,7 +97,6 @@ def register():
     sc.movie_step = IntProperty(name="Step", default=1, min=1)
     sc.image_texture = PointerProperty(name="Image", type=bpy.types.Image)
 
-    # NEW: Curve & Split Modes
     sc.gradient_mode = EnumProperty(
         name="Mode",
         items=[
@@ -120,15 +114,16 @@ def register():
     
     sc.offset_line_start = FloatVectorProperty(name="Offset Line Start", size=3, subtype='XYZ', default=(0.0, 0.0, 0.0))
     sc.offset_line_end = FloatVectorProperty(name="Offset Line End", size=3, subtype='XYZ', default=(0.0, 0.0, 0.0))
+    
+    # --- EXPORT PROPS ---
     sc.export_folder = StringProperty(name="Export Folder", subtype='DIR_PATH', default="//")
+    sc.export_filename = StringProperty(name="Filename", default="color_transfer", description="Name of the exported JSON file")
 
-    # NEW: Collections
     sc.drone_formations = CollectionProperty(type=properties.LightingModFormation)
     sc.drone_formations_index = IntProperty()
     sc.temporal_stages = CollectionProperty(type=properties.LightingModTemporalStage)
     sc.temporal_stages_index = IntProperty()
 
-    # Init Filter
     try:
         if bpy.context and bpy.context.scene:
             utils.set_editor_filter_for_layer(bpy.context, bpy.context.scene.ly_layers_index)
@@ -167,7 +162,10 @@ def unregister():
     del bpy.types.Scene.curve_mode
     del bpy.types.Scene.offset_line_start
     del bpy.types.Scene.offset_line_end
+    
     del bpy.types.Scene.export_folder
+    del bpy.types.Scene.export_filename # <--- Cleanup
+    
     del bpy.types.Scene.drone_formations
     del bpy.types.Scene.drone_formations_index
     del bpy.types.Scene.temporal_stages

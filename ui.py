@@ -111,7 +111,6 @@ class LIGHTINGMOD_PT_panel(bpy.types.Panel):
                 if ng and "Ramp" in ng.nodes: box.template_color_ramp(ng.nodes["Ramp"], "color_ramp")
                 else: box.operator("lightingmod.create_gradient_nodegroup", text="Create Ramp")
                 
-                # --- NEW FLIP BUTTON ---
                 box.operator("lightingmod.flip_color_ramp", icon='FILE_REFRESH', text="Flip Gradient Colors")
                 
                 if sc.gradient_mode != 'CURVE': box.operator("lightingmod.draw_gradient", icon='BRUSH_DATA', text="Draw Gradient")
@@ -166,11 +165,11 @@ class LIGHTINGMOD_PT_export(bpy.types.Panel):
     def draw(self, context):
         sc=context.scene; layout=self.layout
         layout.prop(sc,"export_folder",text="CSV Folder")
+        layout.prop(sc, "export_filename", text="Filename") # <--- NEW FIELD
         
         col = layout.column(align=True)
         col.operator("lightingmod.export_csv_colors", text="Overwrite CSV Colors", icon='FILE_TEXT')
         col.operator("lightingmod.export_color_transfer", text="Export Colour Transfer", icon='EXPORT')
-
 
 classes = (
     LIGHTINGMOD_UL_layers, LIGHTINGMOD_UL_effector_colors,
