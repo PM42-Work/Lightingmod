@@ -26,7 +26,7 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
     
     # Data Storage
     lookup_table = []   # [(obj, pixel_index), ...]
-    drone_data = {}     # {obj_name: [[r,g,b], [r,g,b], ...]}
+    drone_data = {}     # {obj_name: [[r,g,b], ...]}
     
     def invoke(self, context, event):
         sc = context.scene
@@ -38,6 +38,7 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
 
         start, end, step = sc.effector_start, sc.effector_end, sc.movie_step
         if step < 1: step = 1
+        
         self.frames = list(range(start, end + 1, step))
         if not self.frames:
             self.report({'ERROR'}, "No frames to sample")
@@ -66,7 +67,7 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
             
         self.uv_map_name = sc.movie_uv_map
         self.target_prop = f'Layer_{int(sc.effector_target_layer)+1}'
-        self.target_data_path = f'["{self.target_prop}"]' # e.g. ["Layer_1"]
+        self.target_data_path = f'["{self.target_prop}"]'
         
         # 3. Pre-Calc Pixel Indices (Lookup Table)
         self.lookup_table = []
@@ -80,7 +81,7 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
             loops = o.data.uv_layers[self.uv_map_name].data
             if not loops: continue
             
-            # Init storage for this drone
+            # Init storage
             self.drone_data[o.name] = []
             
             # UV Average
@@ -109,72 +110,75 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
         wm.progress_begin(0, len(self.frames))
         context.window.cursor_modal_set('WAIT')
         
-        # Fast Timer
-        self._timer = wm.event_timer_add(0.05, window=context.window)
+        # Slower timer to allow image reload & UI redraw
+        self._timer = wm.event_timer_add(0.1, window=context.window)
         wm.modal_handler_add(self)
         
         print(f"--- Sampling Movie: {len(self.frames)} frames ---")
         return {'RUNNING_MODAL'}
 
     def save_keyframes(self, context):
-        """Bulk write all stored data to F-Curves using NumPy"""
-        print("Writing keyframes to F-Curves...")
+        """Merges new data with existing F-Curves (Range Overwrite)"""
+        print("Merging keyframes...")
         
+        # New Data Arrays
         frames_arr = np.array(self.frames, dtype=np.float32)
-        count = len(frames_arr)
-        
-        # We need an array of [frame, val, frame, val...]
-        # We can pre-allocate the 'frame' part since it's the same for everyone
-        # But we must interleave it per channel.
+        start_f = frames_arr[0]
+        end_f   = frames_arr[-1]
         
         for obj_name, color_data in self.drone_data.items():
             obj = bpy.data.objects.get(obj_name)
             if not obj: continue
             
             # Ensure Action
-            if not obj.animation_data:
-                obj.animation_data_create()
+            if not obj.animation_data: obj.animation_data_create()
             if not obj.animation_data.action:
                 obj.animation_data.action = bpy.data.actions.new(name=f"{obj.name}Action")
-            
             action = obj.animation_data.action
             
-            # Convert color list to numpy (frames x 3)
-            # This is a matrix of [[r,g,b], [r,g,b], ...]
-            # If color_data is incomplete (cancelled early), trim frames
-            if len(color_data) != count:
-                print(f"Skipping {obj_name}: Data mismatch")
+            if len(color_data) != len(frames_arr):
                 continue
                 
             colors_np = np.array(color_data, dtype=np.float32) # Shape: (N, 3)
             
             # Process R, G, B channels
             for i in range(3):
-                # 1. Get or Create F-Curve
-                # We try to find existing one to overwrite, or make new
+                # 1. Get F-Curve
                 fc = action.fcurves.find(data_path=self.target_data_path, index=i)
-                if fc:
-                    # Clear existing points to avoid conflicts
-                    fc.keyframe_points.clear()
-                else:
+                if not fc:
                     fc = action.fcurves.new(data_path=self.target_data_path, index=i)
                 
-                # 2. Add empty points
-                fc.keyframe_points.add(count)
+                # 2. Read Existing Keyframes
+                n_points = len(fc.keyframe_points)
+                kept_keys = np.empty((0, 2), dtype=np.float32)
                 
-                # 3. Interleave [Frame, Value, Frame, Value...]
-                # Create empty array of size N*2
-                flat_data = np.empty(count * 2, dtype=np.float32)
+                if n_points > 0:
+                    # Bulk read current keys
+                    existing = np.empty(n_points * 2, dtype=np.float32)
+                    fc.keyframe_points.foreach_get('co', existing)
+                    existing = existing.reshape((-1, 2))
+                    
+                    # Filter: Keep keys OUTSIDE the bake range
+                    mask = (existing[:, 0] < start_f) | (existing[:, 0] > end_f)
+                    kept_keys = existing[mask]
                 
-                # Fill even indices with frames: 0, 2, 4...
-                flat_data[0::2] = frames_arr
-                # Fill odd indices with color values: 1, 3, 5...
-                flat_data[1::2] = colors_np[:, i]
+                # 3. Prepare New Keys
+                new_keys = np.empty((len(frames_arr), 2), dtype=np.float32)
+                new_keys[:, 0] = frames_arr
+                new_keys[:, 1] = colors_np[:, i]
                 
-                # 4. Fast Set
-                fc.keyframe_points.foreach_set('co', flat_data)
+                # 4. Merge & Sort
+                if len(kept_keys) > 0:
+                    final_keys = np.vstack((kept_keys, new_keys))
+                    # Sort by time (column 0)
+                    final_keys = final_keys[final_keys[:, 0].argsort()]
+                else:
+                    final_keys = new_keys
                 
-                # 5. Update Curve
+                # 5. Write Back
+                fc.keyframe_points.clear()
+                fc.keyframe_points.add(len(final_keys))
+                fc.keyframe_points.foreach_set('co', final_keys.flatten())
                 fc.update()
 
     def cleanup(self, context):
@@ -193,42 +197,47 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
             if self.idx < len(self.frames):
                 frame = self.frames[self.idx]
                 
+                # 1. Move Timeline
                 context.scene.frame_set(frame)
+                
+                # 2. Force Updates (Crucial for Movie Textures)
+                # We force reload to break the static cache
+                try:
+                    self.img.reload() 
+                except: 
+                    pass
+                
                 context.view_layer.update()
                 
                 try:
-                    # Fast Pixel Read
+                    # 3. Fast Pixel Read
                     raw_pixels = np.empty(self.w * self.h * 4, dtype=np.float32)
                     self.img.pixels.foreach_get(raw_pixels)
                 except Exception:
+                    # Skip frame if read fails
                     self.idx += 1
                     return {'RUNNING_MODAL'}
 
-                # Fast Collection (No Writing to Blender API yet)
+                # 4. Fast Data Collection
                 for obj, base_idx in self.lookup_table:
                     if base_idx + 2 < len(raw_pixels):
                         r = raw_pixels[base_idx]
                         g = raw_pixels[base_idx+1]
                         b = raw_pixels[base_idx+2]
-                        # Append to storage
                         self.drone_data[obj.name].append((r, g, b))
                     else:
-                        # Fallback for out of bounds
                         self.drone_data[obj.name].append((0.0, 0.0, 0.0))
 
                 self.idx += 1
                 
-                # Update UI
                 if self.idx % 5 == 0:
                     context.window_manager.progress_update(self.idx)
                     print(f"Sampling Frame {self.idx}/{len(self.frames)}")
                 
                 return {'RUNNING_MODAL'}
             
-            # --- FINISHED LOOP ---
-            # Now we write everything at once
+            # Done
             self.save_keyframes(context)
-            
             self.cleanup(context)
             self.report({'INFO'}, "Movie Bake Complete")
             return {'FINISHED'}
