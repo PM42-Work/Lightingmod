@@ -35,9 +35,8 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
             self.report({'ERROR'}, "Pick an Image Texture")
             return {'CANCELLED'}
         
-        # --- FIX 1: FORCE AUTO REFRESH ---
-        # Without this, the movie ignores the timeline position
-        img.use_auto_refresh = True
+        # [Corrected] Removed the invalid 'use_auto_refresh' line.
+        # We rely on view_layer.update() in the loop to handle refreshes.
         
         start, end, step = sc.effector_start, sc.effector_end, sc.movie_step
         self.frames = list(range(start, end + 1, step))
@@ -60,7 +59,6 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
             return {'CANCELLED'}
 
         # 2. Setup Image
-        # Note: We do NOT reload() here repeatedly; auto_refresh handles it.
         self.img = img
         self.w, self.h = img.size
         self.uv_map_name = sc.movie_uv_map
@@ -142,22 +140,22 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
                 # Update the LIGHTWEIGHT temp scene (very fast)
                 self.temp_scene.frame_set(frame)
                 
-                # --- FIX 2: FORCE DEPENDENCY UPDATE ---
-                # This ensures the Image Texture node processes the new frame time.
+                # --- KEY FIX: FORCE DEPENDENCY UPDATE ---
+                # This ensures the Image Texture processes the new frame time.
                 # Without this, 'pixels' will return the cached data from the previous frame.
                 context.view_layer.update()
                 
-                # (Optional) 'reload' is usually not needed if auto_refresh is on, 
-                # and can actually cause playback stutters. We skip it unless necessary.
-                # try: self.img.reload() 
-                # except: pass
-                    
                 try:
                     px = self.img.pixels # This read triggers the buffer fetch
                 except Exception:
                     # Fallback for some video formats that might lock up
-                    self.img.reload()
-                    px = self.img.pixels
+                    try:
+                        self.img.reload()
+                        px = self.img.pixels
+                    except:
+                        # If image is broken, skip this frame to avoid crash
+                        self.idx += 1
+                        return {'RUNNING_MODAL'}
 
                 w, h = self.w, self.h
                 prop = self.target_prop
