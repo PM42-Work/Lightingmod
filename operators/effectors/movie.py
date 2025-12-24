@@ -1,7 +1,19 @@
 import bpy
 import numpy as np
+import os
+import sys
+
+
+# Import File Browser Helper
+from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty
-from ... import utils
+
+# Try to import OpenCV
+try:
+    import cv2
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
 
 class LIGHTINGMOD_OT_generate_uv(bpy.types.Operator):
     bl_idname = "lightingmod.generate_uv"
@@ -19,32 +31,47 @@ class LIGHTINGMOD_OT_generate_uv(bpy.types.Operator):
         self.report({'INFO'}, f"UV map '{name}' added & activated")
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
+class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator, ImportHelper):
+    """Pick a video file and map its pixels to drone colors over time"""
     bl_idname = "lightingmod.movie_sampler"
-    bl_label  = "Sample Image (Bulk)"
-    _timer = None
+    bl_label  = "Sample Video File"
+    bl_options = {'REGISTER', 'UNDO'}
     
-    # Data Storage
-    lookup_table = []   # [(obj, pixel_index), ...]
-    drone_data = {}     # {obj_name: [[r,g,b], ...]}
-    
+    # ImportHelper props
+    filter_glob: StringProperty(
+        default="*.mp4;*.mov;*.avi;*.mkv;*.webm",
+        options={'HIDDEN'},
+        maxlen=255,
+    )
+
     def invoke(self, context, event):
-        sc = context.scene
-        img = sc.image_texture
-        
-        if not img:
-            self.report({'ERROR'}, "Pick an Image Texture")
+        # Open the standard Blender File Browser
+        context.window_manager.fileselect_add(self)
+        # Alternatively, for full screen file browser:
+        # context.window_manager.fileselect_add(self)
+        # return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        # 1. CHECK DEPENDENCIES
+        if not HAS_OPENCV:
+            self.report({'ERROR'}, "OpenCV not found. Please check addon dependencies.")
             return {'CANCELLED'}
 
+        filepath = self.filepath
+        if not os.path.exists(filepath):
+            self.report({'ERROR'}, "File not found")
+            return {'CANCELLED'}
+
+        sc = context.scene
         start, end, step = sc.effector_start, sc.effector_end, sc.movie_step
         if step < 1: step = 1
         
-        self.frames = list(range(start, end + 1, step))
-        if not self.frames:
-            self.report({'ERROR'}, "No frames to sample")
+        frames = list(range(start, end + 1, step))
+        if not frames:
+            self.report({'ERROR'}, "No frames to process")
             return {'CANCELLED'}
-            
-        # 1. Identify Drones
+
+        # 2. IDENTIFY DRONES
         objs = []
         if sc.effector_selection_mode == 'GROUP' and sc.drone_formations:
              if sc.drone_formations[sc.drone_formations_index].groups:
@@ -53,38 +80,33 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
         else:
              objs = context.selected_objects if sc.effector_selected_only else bpy.data.objects
 
-        self.drones = [o for o in objs if o.get("md_sphere") and o.type=='MESH']
-        if not self.drones:
+        drones = [o for o in objs if o.get("md_sphere") and o.type=='MESH']
+        if not drones:
             self.report({'WARNING'}, "No valid drones found")
             return {'CANCELLED'}
 
-        # 2. Image & Props
-        self.img = img
-        self.w, self.h = img.size
-        if self.w == 0 or self.h == 0:
-            self.report({'ERROR'}, "Image has 0 size.")
+        # 3. LOAD VIDEO
+        cap = cv2.VideoCapture(filepath)
+        if not cap.isOpened():
+            self.report({'ERROR'}, "Could not open video file.")
             return {'CANCELLED'}
-            
-        self.uv_map_name = sc.movie_uv_map
-        self.target_prop = f'Layer_{int(sc.effector_target_layer)+1}'
-        self.target_data_path = f'["{self.target_prop}"]'
         
-        # 3. Pre-Calc Pixel Indices (Lookup Table)
-        self.lookup_table = []
-        self.drone_data = {}
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
-        w_int = int(self.w)
-        h_int = int(self.h)
+        # 4. BUILD LOOKUP TABLE (UV -> Pixel Coordinate)
+        uv_map_name = sc.movie_uv_map
+        lookup_table = [] # [(obj, x, y), ...]
         
-        for o in self.drones:
-            if self.uv_map_name not in o.data.uv_layers: continue
-            loops = o.data.uv_layers[self.uv_map_name].data
+        # Dictionary to store results in memory: {obj_name: [(r,g,b), (r,g,b)...]}
+        drone_data = {o.name: [] for o in drones} 
+        
+        for o in drones:
+            if uv_map_name not in o.data.uv_layers: continue
+            loops = o.data.uv_layers[uv_map_name].data
             if not loops: continue
             
-            # Init storage
-            self.drone_data[o.name] = []
-            
-            # UV Average
+            # Average UV Center
             avg_u, avg_v = 0.0, 0.0
             for lp in loops:
                 avg_u += lp.uv[0]
@@ -93,153 +115,109 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator):
             u = max(0.0, min(1.0, avg_u / count))
             v = max(0.0, min(1.0, avg_v / count))
             
-            px_x = int(u * (w_int - 1))
-            px_y = int(v * (h_int - 1))
+            # Convert to Pixel Coordinates
+            # OpenCV Origin = Top-Left. Blender UV Origin = Bottom-Left.
+            px_x = int(u * (w - 1))
+            px_y = int((1.0 - v) * (h - 1))
             
-            # Index = (y * w + x) * 4
-            base_idx = (px_y * w_int + px_x) * 4
-            self.lookup_table.append((o, base_idx))
+            lookup_table.append((o, px_x, px_y))
 
-        if not self.lookup_table:
-             self.report({'WARNING'}, f"No drones have valid UVs")
-             return {'CANCELLED'}
+        if not lookup_table:
+            cap.release()
+            self.report({'WARNING'}, f"No drones found with UV Map '{uv_map_name}'")
+            return {'CANCELLED'}
 
-        # 4. Start Modal
-        self.idx = 0
-        wm = context.window_manager
-        wm.progress_begin(0, len(self.frames))
-        context.window.cursor_modal_set('WAIT')
+        # 5. PROCESS VIDEO (Memory Only)
+        self.report({'INFO'}, "Processing Video...")
+        # Since this is synchronous, the UI will hang briefly. 
+        # For a few seconds of processing, this is acceptable and safer.
         
-        # Slower timer to allow image reload & UI redraw
-        self._timer = wm.event_timer_add(0.1, window=context.window)
-        wm.modal_handler_add(self)
+        for target_frame in frames:
+            # Map Timeline Frame to Video Frame (assuming sync start at 0)
+            # You can add an offset property here if needed.
+            video_frame = max(0, target_frame - 1)
+            
+            cap.set(cv2.CAP_PROP_POS_FRAMES, video_frame)
+            ret, frame_img = cap.read()
+            
+            if not ret:
+                # Pad with black if video ends
+                for obj, x, y in lookup_table:
+                    drone_data[obj.name].append((0.0, 0.0, 0.0))
+            else:
+                # OpenCV is BGR. We need RGB.
+                # Accessing pixels: frame_img[y, x]
+                for obj, x, y in lookup_table:
+                    if 0 <= x < w and 0 <= y < h:
+                        b, g, r = frame_img[y, x]
+                        drone_data[obj.name].append((r/255.0, g/255.0, b/255.0))
+                    else:
+                        drone_data[obj.name].append((0.0, 0.0, 0.0))
         
-        print(f"--- Sampling Movie: {len(self.frames)} frames ---")
-        return {'RUNNING_MODAL'}
+        cap.release()
+        
+        # 6. BULK WRITE TO BLENDER
+        self.save_keyframes(context, drones, frames, drone_data)
+        
+        self.report({'INFO'}, f"Successfully mapped video to {len(drones)} drones.")
+        return {'FINISHED'}
 
-    def save_keyframes(self, context):
-        """Merges new data with existing F-Curves (Range Overwrite)"""
-        print("Merging keyframes...")
+    def save_keyframes(self, context, drones, frames, drone_data):
+        """Writes collected data to F-Curves, preserving outside keys"""
+        sc = context.scene
+        target_prop = f'Layer_{int(sc.effector_target_layer)+1}'
+        data_path = f'["{target_prop}"]'
         
-        # New Data Arrays
-        frames_arr = np.array(self.frames, dtype=np.float32)
+        frames_arr = np.array(frames, dtype=np.float32)
         start_f = frames_arr[0]
-        end_f   = frames_arr[-1]
+        end_f = frames_arr[-1]
         
-        for obj_name, color_data in self.drone_data.items():
-            obj = bpy.data.objects.get(obj_name)
-            if not obj: continue
-            
-            # Ensure Action
+        for obj in drones:
+            colors = drone_data.get(obj.name)
+            if not colors or len(colors) != len(frames_arr):
+                continue
+                
+            # Create Action if needed
             if not obj.animation_data: obj.animation_data_create()
             if not obj.animation_data.action:
                 obj.animation_data.action = bpy.data.actions.new(name=f"{obj.name}Action")
             action = obj.animation_data.action
             
-            if len(color_data) != len(frames_arr):
-                continue
-                
-            colors_np = np.array(color_data, dtype=np.float32) # Shape: (N, 3)
+            colors_np = np.array(colors, dtype=np.float32)
             
-            # Process R, G, B channels
-            for i in range(3):
-                # 1. Get F-Curve
-                fc = action.fcurves.find(data_path=self.target_data_path, index=i)
-                if not fc:
-                    fc = action.fcurves.new(data_path=self.target_data_path, index=i)
+            for i in range(3): # R, G, B
+                # Find/Create Curve
+                fc = action.fcurves.find(data_path=data_path, index=i)
+                if not fc: fc = action.fcurves.new(data_path=data_path, index=i)
                 
-                # 2. Read Existing Keyframes
+                # 1. Preserve keys outside range
                 n_points = len(fc.keyframe_points)
                 kept_keys = np.empty((0, 2), dtype=np.float32)
                 
                 if n_points > 0:
-                    # Bulk read current keys
                     existing = np.empty(n_points * 2, dtype=np.float32)
                     fc.keyframe_points.foreach_get('co', existing)
                     existing = existing.reshape((-1, 2))
                     
-                    # Filter: Keep keys OUTSIDE the bake range
+                    # Logic: Keep keys strictly BEFORE start or AFTER end
                     mask = (existing[:, 0] < start_f) | (existing[:, 0] > end_f)
                     kept_keys = existing[mask]
                 
-                # 3. Prepare New Keys
+                # 2. Prepare new keys
                 new_keys = np.empty((len(frames_arr), 2), dtype=np.float32)
                 new_keys[:, 0] = frames_arr
                 new_keys[:, 1] = colors_np[:, i]
                 
-                # 4. Merge & Sort
+                # 3. Merge
                 if len(kept_keys) > 0:
                     final_keys = np.vstack((kept_keys, new_keys))
-                    # Sort by time (column 0)
+                    # Sort by frame number
                     final_keys = final_keys[final_keys[:, 0].argsort()]
                 else:
                     final_keys = new_keys
                 
-                # 5. Write Back
+                # 4. Write
                 fc.keyframe_points.clear()
                 fc.keyframe_points.add(len(final_keys))
                 fc.keyframe_points.foreach_set('co', final_keys.flatten())
                 fc.update()
-
-    def cleanup(self, context):
-        if self._timer:
-            context.window_manager.event_timer_remove(self._timer)
-        context.window_manager.progress_end()
-        context.window.cursor_modal_restore()
-
-    def modal(self, context, event):
-        if event.type in {'ESC', 'RIGHTMOUSE'}:
-            self.cleanup(context)
-            self.report({'WARNING'}, "Baking Cancelled")
-            return {'CANCELLED'}
-            
-        if event.type == 'TIMER':
-            if self.idx < len(self.frames):
-                frame = self.frames[self.idx]
-                
-                # 1. Move Timeline
-                context.scene.frame_set(frame)
-                
-                # 2. Force Updates (Crucial for Movie Textures)
-                # We force reload to break the static cache
-                try:
-                    self.img.reload() 
-                except: 
-                    pass
-                
-                context.view_layer.update()
-                
-                try:
-                    # 3. Fast Pixel Read
-                    raw_pixels = np.empty(self.w * self.h * 4, dtype=np.float32)
-                    self.img.pixels.foreach_get(raw_pixels)
-                except Exception:
-                    # Skip frame if read fails
-                    self.idx += 1
-                    return {'RUNNING_MODAL'}
-
-                # 4. Fast Data Collection
-                for obj, base_idx in self.lookup_table:
-                    if base_idx + 2 < len(raw_pixels):
-                        r = raw_pixels[base_idx]
-                        g = raw_pixels[base_idx+1]
-                        b = raw_pixels[base_idx+2]
-                        self.drone_data[obj.name].append((r, g, b))
-                    else:
-                        self.drone_data[obj.name].append((0.0, 0.0, 0.0))
-
-                self.idx += 1
-                
-                if self.idx % 5 == 0:
-                    context.window_manager.progress_update(self.idx)
-                    print(f"Sampling Frame {self.idx}/{len(self.frames)}")
-                
-                return {'RUNNING_MODAL'}
-            
-            # Done
-            self.save_keyframes(context)
-            self.cleanup(context)
-            self.report({'INFO'}, "Movie Bake Complete")
-            return {'FINISHED'}
-            
-        return {'PASS_THROUGH'}

@@ -1,15 +1,12 @@
 name: Manual Release
 
 on:
-  # This allows you to click a button in the "Actions" tab to trigger the release
   workflow_dispatch:
     inputs:
       version:
         description: 'Version Tag (e.g., v0.3.2)'
         required: true
         default: 'v0.3.x'
-
-  # This allows you to also trigger it by pushing a tag via git (optional)
   push:
     tags:
       - "v*"
@@ -25,26 +22,26 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. Prepare the folder structure so the addon installs correctly
+      # --- NEW STEP ---
+      - name: Bundle OpenCV Dependencies
+        run: |
+          chmod +x setup_dependencies.sh
+          ./setup_dependencies.sh
+
+      # --- MODIFIED STEP ---
       - name: Create Clean Zip
         run: |
-          # Define the folder name users will see in Blender
           FOLDER_NAME="AdvancedLighting"
-          
-          # Create a temp directory
           mkdir $FOLDER_NAME
           
-          # Copy all files into that directory (excluding git and hidden files)
+          # Now includes the 'dependencies' folder created above
           rsync -av --progress . $FOLDER_NAME --exclude $FOLDER_NAME --exclude .git --exclude .github --exclude .gitignore
           
-          # Zip the directory
-          zip -r "$FOLDER_NAME.zip" $FOLDER_NAME
+          zip -r "AdvancedLighting.zip" $FOLDER_NAME
 
-      # 2. Upload the Release to GitHub
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          # Use the tag from the push OR the manual input
           tag_name: ${{ github.ref_name == 'main' && inputs.version || github.ref_name }}
           files: AdvancedLighting.zip
           draft: false

@@ -8,7 +8,30 @@ bl_info = {
     "category": "3D View",
 }
 
+import sys
+import os
+import platform
 import bpy
+
+# Register Dependencies
+current_dir = os.path.dirname(os.path.realpath(__file__))
+system_platform = platform.system().lower() # 'windows', 'linux', or 'darwin'
+
+# Map platform to folder
+if system_platform == 'windows':
+    dep_folder = "win"
+elif system_platform == 'darwin':
+    dep_folder = "mac"
+else:
+    dep_folder = "linux"
+
+dep_path = os.path.join(current_dir, "dependencies", dep_folder)
+
+# Insert into sys.path
+if dep_path not in sys.path:
+    sys.path.insert(0, dep_path)
+# ------------------------
+
 from bpy.props import (StringProperty, EnumProperty, FloatProperty, IntProperty,
                        FloatVectorProperty, CollectionProperty, BoolProperty, PointerProperty)
 
