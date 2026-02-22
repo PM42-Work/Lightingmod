@@ -22,13 +22,15 @@ class LIGHTINGMOD_OT_layer_add(bpy.types.Operator):
         out.location = (600,0)
         em = nodes.get("Emission") or nodes.new("ShaderNodeEmission")
         em.location = (400,0)
-        if not em.outputs['Emission'].links:
-            links.new(em.outputs['Emission'], out.inputs['Surface'])
+        
+        # out.inputs[0] = Surface, em.outputs[0] = Emission
+        if not em.outputs[0].links:
+            links.new(em.outputs[0], out.inputs[0])
             
         if idx == 0:
             a0 = nodes.new("ShaderNodeAttribute")
             a0.name = 'Base_Layer'; a0.attribute_name = "Layer_1"; a0.attribute_type='OBJECT'; a0.location=(0,0)
-            links.new(a0.outputs['Color'], em.inputs['Color'])
+            links.new(a0.outputs[0], em.inputs[0]) # em.inputs[0] = Color
             
         prop = f"Layer_{idx+1}"
         for obj in bpy.data.objects:
@@ -40,7 +42,7 @@ class LIGHTINGMOD_OT_layer_add(bpy.types.Operator):
                 ui.update(min=0, max=1, subtype='COLOR')
         
         if idx > 0:
-            oldlink = em.inputs['Color'].links[0]
+            oldlink = em.inputs[0].links[0]
             prev = oldlink.from_socket
             links.remove(oldlink)
             
@@ -58,11 +60,11 @@ class LIGHTINGMOD_OT_layer_add(bpy.types.Operator):
             tgt = var.targets[0]; tgt.id_type='SCENE'; tgt.id=sc; tgt.data_path=f'ly_layers[{idx}].opacity'
             drv.expression = var.name
             
-            # 3. HSV (Extracts Max RGB via 'Value' output)
+            # 3. HSV (Extracts Max RGB via 'Value' output [2])
             sep_hsv = nodes.new("ShaderNodeSeparateHSV")
             sep_hsv.name = f"Layer_HSV_{idx+1}"
             sep_hsv.location = (0, -300*idx + 150)
-            links.new(attr.outputs['Color'], sep_hsv.inputs['Color'])
+            links.new(attr.outputs[0], sep_hsv.inputs[0])
             
             # 4. Multiply Node
             math_mul = nodes.new("ShaderNodeMath")
@@ -77,9 +79,10 @@ class LIGHTINGMOD_OT_layer_add(bpy.types.Operator):
             mix.name = f"Layer_Mix_{idx+1}"
             mix.location = (200, -300*idx)
             
-            links.new(prev, mix.inputs['Color1'])
-            links.new(attr.outputs['Color'], mix.inputs['Color2'])
-            links.new(mix.outputs['Color'],  em.inputs['Color'])
+            # Indices for Mix Node: 0=Fac, 1=Color1/A, 2=Color2/B. Outputs: 0=Color/Result
+            links.new(prev, mix.inputs[1])
+            links.new(attr.outputs[0], mix.inputs[2])
+            links.new(mix.outputs[0],  em.inputs[0])
             
             utils.update_mix_node(context, idx)
             
@@ -101,9 +104,9 @@ class LIGHTINGMOD_OT_layer_remove(bpy.types.Operator):
             nodes=mat.node_tree.nodes; links=mat.node_tree.links
             mix=nodes.get(f"Layer_Mix_{idx+1}")
             if mix:
-                prev_links = mix.inputs['Color1'].links
+                prev_links = mix.inputs[1].links # Safe index lookup
                 prev_sock  = prev_links[0].from_socket if prev_links else None
-                outs       = [lk.to_socket for lk in mix.outputs['Color'].links]
+                outs       = [lk.to_socket for lk in mix.outputs[0].links]
                 nodes.remove(mix)
                 if prev_sock:
                     for to in outs: links.new(prev_sock,to)
@@ -139,21 +142,21 @@ class LIGHTINGMOD_OT_redraw_nodes(bpy.types.Operator):
         out.location = (600, 0)
         em = nodes.new("ShaderNodeEmission")
         em.location = (400, 0)
-        links.new(em.outputs['Emission'], out.inputs['Surface'])
+        links.new(em.outputs[0], out.inputs[0])
         
         if not sc.ly_layers:
             return {'FINISHED'}
 
         a0 = nodes.new("ShaderNodeAttribute")
         a0.name = 'Base_Layer'; a0.attribute_name = "Layer_1"; a0.attribute_type = 'OBJECT'; a0.location = (0, 0)
-        links.new(a0.outputs['Color'], em.inputs['Color'])
+        links.new(a0.outputs[0], em.inputs[0])
 
         for idx in range(1, len(sc.ly_layers)):
             layer = sc.ly_layers[idx]
             prop = f"Layer_{idx+1}"
             
             # Always grab the connection entering the Emission node
-            oldlink = em.inputs['Color'].links[0]
+            oldlink = em.inputs[0].links[0]
             prev_out = oldlink.from_socket
             links.remove(oldlink)
             
@@ -179,7 +182,7 @@ class LIGHTINGMOD_OT_redraw_nodes(bpy.types.Operator):
                 sep_hsv = nodes.new("ShaderNodeSeparateHSV")
                 sep_hsv.name = f"Layer_HSV_{idx+1}"
                 sep_hsv.location = (-200, -300 * idx + 150)
-                links.new(attr.outputs['Color'], sep_hsv.inputs['Color'])
+                links.new(attr.outputs[0], sep_hsv.inputs[0])
                 
                 math_mul = nodes.new("ShaderNodeMath")
                 math_mul.name = f"Layer_Math_{idx+1}"
@@ -188,14 +191,14 @@ class LIGHTINGMOD_OT_redraw_nodes(bpy.types.Operator):
                 
                 links.new(sep_hsv.outputs[2], math_mul.inputs[0])
                 links.new(val_node.outputs[0], math_mul.inputs[1])
-                links.new(math_mul.outputs[0], mix.inputs['Fac'])
+                links.new(math_mul.outputs[0], mix.inputs[0])
             else:
-                links.new(val_node.outputs[0], mix.inputs['Fac'])
+                links.new(val_node.outputs[0], mix.inputs[0])
 
             # Wire the new mix node into the chain right before emission
-            links.new(prev_out, mix.inputs['Color1'])
-            links.new(attr.outputs['Color'], mix.inputs['Color2'])
-            links.new(mix.outputs['Color'], em.inputs['Color'])
+            links.new(prev_out, mix.inputs[1])
+            links.new(attr.outputs[0], mix.inputs[2])
+            links.new(mix.outputs[0], em.inputs[0])
 
         utils.refresh_layer_enable(sc)
         self.report({'INFO'}, "Node Tree Redrawn Successfully")

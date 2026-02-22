@@ -83,13 +83,14 @@ def update_mix_node(context, passed_idx=None):
     
     # Only rewire if the advanced nodes actually exist
     if val_node and math_mul:
-        for lnk in mix.inputs['Fac'].links:
+        # mix.inputs[0] is always 'Factor' / 'Fac' across all Blender versions
+        for lnk in mix.inputs[0].links:
             links.remove(lnk)
             
         if mode == 'REPLACE' and USE_MAX_CHANNEL_MATTE:
-            links.new(math_mul.outputs[0], mix.inputs['Fac'])
+            links.new(math_mul.outputs[0], mix.inputs[0])
         else:
-            links.new(val_node.outputs[0], mix.inputs['Fac'])
+            links.new(val_node.outputs[0], mix.inputs[0])
 
 def set_editor_filter_for_layer(context, idx_zero_based: int):
     token = f'Layer_{idx_zero_based+1}'
