@@ -36,6 +36,24 @@ from . import properties
 from . import ui
 from . import operators
 
+# --- ADDON PREFERENCES ---
+class LightingModPreferences(bpy.types.AddonPreferences):
+    bl_idname = __package__
+
+    use_experimental_updates: BoolProperty(
+        name="Opt-in to Experimental Beta Updates",
+        default=False,
+        description="Download pre-release versions from GitHub when updating"
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "use_experimental_updates")
+        
+        btn_text = "Check for Beta Updates" if self.use_experimental_updates else "Check for Stable Updates"
+        layout.operator("lightingmod.update_addon", text=btn_text, icon='FILE_REFRESH')
+
+
 def _on_active_layer_changed(self, context):
     sc = context.scene
     idx = sc.ly_layers_index
@@ -47,6 +65,7 @@ def get_layer_items(self, context):
     return [(str(i), f"{i+1}: {item.name}", "") for i, item in enumerate(context.scene.ly_layers)]
 
 def register():
+    bpy.utils.register_class(LightingModPreferences)
     properties.register()
     ui.register()
     operators.register()
@@ -115,7 +134,6 @@ def register():
     sc.offset_line_start = FloatVectorProperty(name="Offset Line Start", size=3, subtype='XYZ', default=(0.0, 0.0, 0.0))
     sc.offset_line_end = FloatVectorProperty(name="Offset Line End", size=3, subtype='XYZ', default=(0.0, 0.0, 0.0))
     
-    # --- EXPORT PROPS ---
     sc.export_folder = StringProperty(name="Export Folder", subtype='DIR_PATH', default="//")
     sc.export_filename = StringProperty(name="Filename", default="color_transfer", description="Name of the exported JSON file")
 
@@ -133,6 +151,7 @@ def unregister():
     ui.unregister()
     operators.unregister()
     properties.unregister()
+    bpy.utils.unregister_class(LightingModPreferences)
     
     del bpy.types.Scene.ly_layers
     del bpy.types.Scene.ly_layers_index
@@ -162,10 +181,8 @@ def unregister():
     del bpy.types.Scene.curve_mode
     del bpy.types.Scene.offset_line_start
     del bpy.types.Scene.offset_line_end
-    
     del bpy.types.Scene.export_folder
-    del bpy.types.Scene.export_filename # <--- Cleanup
-    
+    del bpy.types.Scene.export_filename
     del bpy.types.Scene.drone_formations
     del bpy.types.Scene.drone_formations_index
     del bpy.types.Scene.temporal_stages
