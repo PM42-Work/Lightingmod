@@ -45,6 +45,20 @@ class LIGHTINGMOD_OT_draw_gradient(bpy.types.Operator):
     stage:  IntProperty(default=0)
 
     def invoke(self, context, event):
+        sc = context.scene
+        
+        # --- FIX 2: Instant Apply for Curve Mode ---
+        if sc.gradient_mode == 'CURVE':
+            if not sc.curve_object:
+                self.report({'ERROR'}, "Please assign a Curve Object in the panel first.")
+                return {'CANCELLED'}
+            # We don't need point data for curves, just pass zeros
+            self.first = (0.0, 0.0, 0.0)
+            self.second = (0.0, 0.0, 0.0)
+            self.apply_gradient(context)
+            self.report({'INFO'}, "Curve Gradient applied instantly")
+            return {'FINISHED'}
+            
         self.depsgraph = context.evaluated_depsgraph_get()
         self.stage = 0
         context.window_manager.modal_handler_add(self)
@@ -107,7 +121,8 @@ class LIGHTINGMOD_OT_draw_gradient(bpy.types.Operator):
                  g = sc.drone_formations[sc.drone_formations_index].groups[sc.drone_formations[sc.drone_formations_index].groups_index]
                  objs = [bpy.data.objects.get(d.object_name) for d in g.drones if bpy.data.objects.get(d.object_name)]
         else:
-             objs = [o for o in (context.selected_objects if sc.effector_selected_only else bpy.data.objects) if o.get("md_sphere") and o.type=='MESH']
+             # --- FIX 1: Respect Viewport Selection ---
+             objs = [o for o in context.selected_objects if o.get("md_sphere") and o.type=='MESH']
 
         for obj in objs:
             if prop not in obj.keys(): continue

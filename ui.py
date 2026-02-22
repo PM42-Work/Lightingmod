@@ -44,6 +44,7 @@ class LIGHTINGMOD_PT_panel(bpy.types.Panel):
         row.operator("lightingmod.layer_add",icon='ADD',text="")
         row.operator("lightingmod.layer_remove",icon='REMOVE',text="")
         row.operator("lightingmod.bake_colors",icon='RENDER_STILL',text="Bake")
+        row.operator("lightingmod.redraw_nodes",icon='FILE_REFRESH',text="Redraw")
         box.template_list("LIGHTINGMOD_UL_layers","",sc,"ly_layers",sc,"ly_layers_index",rows=3)
         if L:
             itm=L[idx]; box.prop(itm,"name",text=("Base Layer" if idx==0 else "Layer"))
@@ -165,7 +166,7 @@ class LIGHTINGMOD_PT_export(bpy.types.Panel):
     def draw(self, context):
         sc=context.scene; layout=self.layout
         layout.prop(sc,"export_folder",text="CSV Folder")
-        layout.prop(sc, "export_filename", text="Filename") # <--- NEW FIELD
+        layout.prop(sc, "export_filename", text="Filename")
         
         col = layout.column(align=True)
         col.operator("lightingmod.export_csv_colors", text="Overwrite CSV Colors", icon='FILE_TEXT')
