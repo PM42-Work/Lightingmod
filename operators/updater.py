@@ -5,11 +5,12 @@ import json
 import zipfile
 import shutil
 import tempfile
+import sys
 
 class LIGHTINGMOD_OT_update_addon(bpy.types.Operator):
     bl_idname = "lightingmod.update_addon"
-    bl_label  = "Update Addon"
-    bl_description = "Downloads and installs the latest release from GitHub"
+    bl_label  = "Check for Updates"
+    bl_description = "Checks GitHub for updates and installs if a newer version is available"
 
     def execute(self, context):
         # 1. Provide your standard GitHub Repo URL here
@@ -33,6 +34,12 @@ class LIGHTINGMOD_OT_update_addon(bpy.types.Operator):
 
         addon_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
+        # 5. Get current local version from __init__.py's bl_info
+        try:
+            local_version = sys.modules[addon_name].bl_info.get('version', (0, 0, 0))
+        except Exception:
+            local_version = (0, 0, 0)
+
         try:
             self.report({'INFO'}, "Checking GitHub for updates...")
             req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -43,9 +50,28 @@ class LIGHTINGMOD_OT_update_addon(bpy.types.Operator):
             # If experimental, API returns a list. Pick the newest one [0].
             release_data = data[0] if isinstance(data, list) else data
             tag_name = release_data.get('tag_name', 'Unknown')
-            assets = release_data.get('assets', [])
             
-            # Find the ZIP asset
+            # 6. Parse GitHub Tag into a version tuple (e.g., "v1.3.0-beta" -> (1, 3, 0))
+            clean_tag = tag_name.lstrip('v').split('-')[0]
+            try:
+                remote_version = tuple(map(int, clean_tag.split('.')))
+            except ValueError:
+                remote_version = (0, 0, 0)
+            
+            local_version_str = ".".join(map(str, local_version))
+            
+            # 7. Compare Versions!
+            if remote_version <= local_version:
+                def draw_uptodate(self, ctx):
+                    self.layout.label(text=f"You are already on the latest version (v{local_version_str}).")
+                    if use_experimental and '-' not in tag_name:
+                        self.layout.label(text="(No experimental pre-releases found on GitHub).")
+                context.window_manager.popup_menu(draw_uptodate, title="Up to Date", icon='INFO')
+                self.report({'INFO'}, "Addon is up to date.")
+                return {'FINISHED'}
+
+            # 8. Proceed with download if an update is found
+            assets = release_data.get('assets', [])
             download_url = None
             for asset in assets:
                 if asset.get('name') == 'AdvancedLighting.zip':
@@ -56,7 +82,7 @@ class LIGHTINGMOD_OT_update_addon(bpy.types.Operator):
                 self.report({'ERROR'}, f"No AdvancedLighting.zip found in release {tag_name}.")
                 return {'CANCELLED'}
 
-            self.report({'INFO'}, f"Downloading version {tag_name}...")
+            self.report({'INFO'}, f"Downloading update {tag_name}...")
             
             with tempfile.TemporaryDirectory() as temp_dir:
                 zip_path = os.path.join(temp_dir, "update.zip")
@@ -76,10 +102,10 @@ class LIGHTINGMOD_OT_update_addon(bpy.types.Operator):
                 # Copy and overwrite files (dirs_exist_ok=True preserves dependencies folder)
                 shutil.copytree(inner_folder, addon_dir, dirs_exist_ok=True)
                 
-            def draw(self, context):
-                self.layout.label(text=f"Successfully updated to version {tag_name}.")
+            def draw_success(self, ctx):
+                self.layout.label(text=f"Successfully updated from v{local_version_str} to {tag_name}.")
                 self.layout.label(text="Please restart Blender to apply changes.")
-            context.window_manager.popup_menu(draw, title="Update Complete", icon='INFO')
+            context.window_manager.popup_menu(draw_success, title="Update Complete", icon='INFO')
             
         except urllib.error.HTTPError as e:
             self.report({'ERROR'}, f"GitHub API Error: {e.code}. Check repository link/visibility.")
