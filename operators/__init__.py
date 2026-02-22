@@ -1,4 +1,4 @@
-from . import layers, baking, batch, effectors, groups
+from . import layers, baking, batch, effectors, groups, updater
 
 def register():
     layers.register()
@@ -6,8 +6,10 @@ def register():
     batch.register()
     effectors.register()
     groups.register()
+    updater.register()
 
 def unregister():
+    updater.unregister()
     groups.unregister()
     effectors.unregister()
     batch.unregister()

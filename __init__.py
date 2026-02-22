@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Advanced Lighting",
     "author": "Raghuvansh Agarwal",
-    "version": (1, 3, 0),
+    "version": (1, 3, 1),
     "blender": (4, 1, 0),
     "location": "View3D > Sidebar > Advanced Lighting",
     "description": "Modular advanced drone color & effector controls",
