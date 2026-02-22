@@ -45,12 +45,7 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator, ImportHelper):
     )
 
     def invoke(self, context, event):
-        # --- THE FIX IS HERE ---
-        # Do NOT put 'return' in front of fileselect_add. 
-        # It returns None, but Blender expects a Set.
         context.window_manager.fileselect_add(self)
-        
-        # We manually return the status telling Blender "The modal window is running"
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
@@ -80,7 +75,8 @@ class LIGHTINGMOD_OT_movie_sampler(bpy.types.Operator, ImportHelper):
                  g = sc.drone_formations[sc.drone_formations_index].groups[sc.drone_formations[sc.drone_formations_index].groups_index]
                  objs = [bpy.data.objects.get(d.object_name) for d in g.drones if bpy.data.objects.get(d.object_name)]
         else:
-             objs = context.selected_objects if sc.effector_selected_only else bpy.data.objects
+             # --- FIX: Respect Viewport Selection ---
+             objs = [o for o in context.selected_objects if o.get("md_sphere") and o.type=='MESH']
 
         drones = [o for o in objs if o.get("md_sphere") and o.type=='MESH']
         if not drones:

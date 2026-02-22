@@ -6,66 +6,73 @@ import re
 from .. import utils
 from bpy.props import FloatProperty
 
-# --- 1. Find Critical Points (Peaks, Valleys, Plateaus) ---
+# --- 1. Find Critical Points (3D Vector Edition) ---
 def find_critical_indices(values):
     """
-    Identifies indices where the direction of change flips (slope sign change).
-    These points are mandatory to preserve strobe timing and intensity.
+    Identifies indices where the direction of change flips in ANY color channel.
+    values expected shape: (N, 3) for RGB.
     """
     n = len(values)
     if n < 3:
-        return np.arange(n) # Keep all if too small
+        return np.arange(n)
 
-    # Calculate differences between consecutive frames
-    diffs = np.diff(values) # Length n-1
+    # Calculate differences between consecutive frames for all channels
+    diffs = np.diff(values, axis=0) # Shape: (N-1, 3)
     
-    # Get signs (-1, 0, 1). 
+    # Get signs (-1, 0, 1)
     signs = np.sign(diffs)
     
-    # Where does the sign change? 
+    # Where does the sign change? (Shape: N-2, 3)
     sign_change = signs[:-1] != signs[1:]
     
+    # A point is critical if ANY of the 3 channels has a sign change
+    any_sign_change = np.any(sign_change, axis=1)
+    
     # Get indices. Shift +1 because diff index i describes interval (i, i+1)
-    turning_points = np.where(sign_change)[0] + 1
+    turning_points = np.where(any_sign_change)[0] + 1
     
     # Always include Start (0) and End (n-1)
     critical = np.concatenate(([0], turning_points, [n-1]))
     return np.unique(critical)
 
-# --- 2. RDP Simplification (Vertical Error Metric) ---
+# --- 2. RDP Simplification (3D Color Distance Metric) ---
 def rdp_simplify(frames, values, epsilon):
     """
-    Reduces points using Ramer-Douglas-Peucker with Vertical Distance error.
+    Reduces points using Ramer-Douglas-Peucker with Euclidean Color Distance.
+    frames: (N,)
+    values: (N, 3)
     """
-    points = np.column_stack((frames, values))
-    
-    if len(points) < 3:
-        return points
+    if len(frames) < 3:
+        return frames, values
 
-    start = points[0]
-    end = points[-1]
+    start_f, end_f = frames[0], frames[-1]
+    start_v, end_v = values[0], values[-1]
     
-    dx = end[0] - start[0]
+    dx = end_f - start_f
     if dx == 0:
-        dists = np.zeros(len(points))
+        dists = np.zeros(len(frames))
     else:
-        # Line Eq: y = mx + c
-        m = (end[1] - start[1]) / dx
-        c = start[1] - m * start[0]
+        # Calculate normalized time 't' for each frame (0.0 to 1.0)
+        t = (frames - start_f) / dx
         
-        # Expected Y vs Actual Y
-        expected_y = m * points[:, 0] + c
-        dists = np.abs(points[:, 1] - expected_y)
+        # Expected RGB: linearly interpolate between start and end values
+        # t is (N,), start_v is (3,), end_v is (3,)
+        expected_v = start_v + t[:, np.newaxis] * (end_v - start_v)
+        
+        # Calculate Euclidean distance in RGB color space
+        dists = np.linalg.norm(values - expected_v, axis=1)
 
     dmax = dists.max()
     index = dists.argmax()
 
     if dmax > epsilon:
-        res1 = rdp_simplify(frames[:index+1], values[:index+1], epsilon)
-        res2 = rdp_simplify(frames[index:],   values[index:],   epsilon)
-        return np.vstack((res1[:-1], res2))
+        res1_f, res1_v = rdp_simplify(frames[:index+1], values[:index+1], epsilon)
+        res2_f, res2_v = rdp_simplify(frames[index:],   values[index:],   epsilon)
+        
+        # Concatenate results, avoiding duplicating the shared point
+        return np.concatenate((res1_f[:-1], res2_f)), np.vstack((res1_v[:-1], res2_v))
     else:
-        return np.array([start, end])
+        return np.array([start_f, end_f]), np.vstack((start_v, end_v))
 
 class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
     bl_idname = "lightingmod.bake_colors"
@@ -101,19 +108,15 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
                         idx = int(m.group(1))
                         fc_map.setdefault(idx, {})[fc.array_index] = fc
             
-            # --- FIX: Robust Type Conversion ---
+            # Robust Type Conversion
             initial_vals = {}
             for i, layer in enumerate(sc.ly_layers):
                 val = o.get(f"Layer_{i+1}", [0.0, 0.0, 0.0])
                 try:
-                    # Force conversion to Python list of floats
-                    # This handles IDPropertyArray correctly even if hasattr fails
                     lst = list(val)
-                    # Ensure at least 3 components (RGB)
                     if len(lst) < 3: lst = lst + [0.0]*(3-len(lst))
                     initial_vals[i+1] = lst[:3]
                 except TypeError:
-                    # If val is a single float/int (not iterable), broadcast it
                     initial_vals[i+1] = [float(val)] * 3
                 
             obj_fcurves[o.name] = {'fc_map': fc_map, 'initials': initial_vals}
@@ -179,7 +182,7 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
                     
                     base_col = utils.blend_colors(base_col, top, l_cfg['blend'], fac)
                 
-                # Store as 0-255 int
+                # Store as 0-255 int for consistent storage
                 final_colors.append(tuple(int(c * 255) for c in base_col))
                 
             return obj_name, final_colors
@@ -199,7 +202,7 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
         
         wm.progress_end()
         
-        # 5. BULK WRITE KEYFRAMES (With Two-Pass Compression)
+        # 5. BULK WRITE KEYFRAMES (With 3D Vector Compression)
         print(f"Writing keyframes to F-Curves (Tolerance: {self.tolerance})...")
         wm.progress_begin(0, len(utils.baked_colors))
         
@@ -215,52 +218,60 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
             
             action = o.animation_data.action
             
-            # Convert to float 0-1
-            col_arr = np.array(color_data, dtype=np.float32) / 255.0
-            
             # Remove existing color curves
             existing_curves = [fc for fc in action.fcurves if fc.data_path == "color"]
             for fc in existing_curves: action.fcurves.remove(fc)
+
+            # Convert to float 0.0-1.0 (Shape: N, 3)
+            col_arr = np.array(color_data, dtype=np.float32) / 255.0
                 
+            # --- TWO-PASS COMPRESSION (VECTOR BASED) ---
+            if self.tolerance > 0.0:
+                # Pass 1: Find Critical Points across ALL channels
+                critical_idx = find_critical_indices(col_arr)
+                
+                final_frames_list = []
+                final_vals_list = []
+                
+                # Pass 2: Run RDP on segments BETWEEN critical points
+                for k in range(len(critical_idx) - 1):
+                    idx_start = critical_idx[k]
+                    idx_end   = critical_idx[k+1]
+                    
+                    seg_frames = frames_arr[idx_start : idx_end + 1]
+                    seg_vals   = col_arr[idx_start : idx_end + 1]
+                    
+                    # Compress monotonic segment (3D distance)
+                    sf, sv = rdp_simplify(seg_frames, seg_vals, self.tolerance)
+                    
+                    if k > 0:
+                        final_frames_list.extend(sf[1:])
+                        final_vals_list.append(sv[1:])
+                    else:
+                        final_frames_list.extend(sf)
+                        final_vals_list.append(sv)
+                
+                if final_vals_list:
+                    final_frames = np.array(final_frames_list)
+                    final_vals = np.vstack(final_vals_list)
+                else:
+                    final_frames = frames_arr
+                    final_vals = col_arr
+                
+            else:
+                final_frames = frames_arr
+                final_vals = col_arr
+            
+            # --- WRITE SYNCHRONIZED KEYFRAMES ---
             for channel in range(3):
                 fc = action.fcurves.new(data_path="color", index=channel)
                 
-                channel_vals = col_arr[:, channel]
+                channel_vals = final_vals[:, channel]
+                final_data = np.column_stack((final_frames, channel_vals))
                 
-                # --- TWO-PASS COMPRESSION ---
-                if self.tolerance > 0.0:
-                    # Pass 1: Find Critical Points (Slope Changes)
-                    critical_idx = find_critical_indices(channel_vals)
-                    
-                    simplified_segments = []
-                    
-                    # Pass 2: Run RDP on segments BETWEEN critical points
-                    for k in range(len(critical_idx) - 1):
-                        idx_start = critical_idx[k]
-                        idx_end   = critical_idx[k+1]
-                        
-                        seg_frames = frames_arr[idx_start : idx_end + 1]
-                        seg_vals   = channel_vals[idx_start : idx_end + 1]
-                        
-                        # Compress monotonic segment
-                        seg_res = rdp_simplify(seg_frames, seg_vals, self.tolerance)
-                        
-                        if k > 0:
-                            simplified_segments.append(seg_res[1:])
-                        else:
-                            simplified_segments.append(seg_res)
-                    
-                    if simplified_segments:
-                        final_data = np.vstack(simplified_segments)
-                    else:
-                        final_data = np.column_stack((frames_arr, channel_vals))
-                    
-                else:
-                    final_data = np.column_stack((frames_arr, channel_vals))
-                
-                # Write
                 fc.keyframe_points.add(len(final_data))
                 fc.keyframe_points.foreach_set('co', final_data.flatten())
+                fc.update()
             
             if i % 50 == 0: wm.progress_update(i)
 
