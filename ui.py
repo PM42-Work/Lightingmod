@@ -38,22 +38,46 @@ class LIGHTINGMOD_PT_panel(bpy.types.Panel):
         sc=context.scene; obj=context.object; L=sc.ly_layers; idx=L and sc.ly_layers_index
         layout=self.layout
 
-        # Layers
+        # --- 1. LAYERS BLOCK ---
         box=layout.box(); box.label(text="Layers")
+        
+        # If needs rebuilding, show the Big Apply Button and lock everything else!
+        if sc.needs_layer_rebuild:
+            box.operator("lightingmod.apply_layer_order", text="Apply Layer Order", icon='ERROR')
+            
         row=box.row(align=True)
+        row.enabled = not sc.needs_layer_rebuild # UI Lock!
+        
         row.operator("lightingmod.layer_add",icon='ADD',text="")
         row.operator("lightingmod.layer_remove",icon='REMOVE',text="")
-        row.operator("lightingmod.bake_colors",icon='RENDER_STILL',text="Bake")
-        row.operator("lightingmod.redraw_nodes",icon='FILE_REFRESH',text="Redraw")
-        box.template_list("LIGHTINGMOD_UL_layers","",sc,"ly_layers",sc,"ly_layers_index",rows=3)
+        
+        row.operator("lightingmod.layer_move", icon='TRIA_UP', text="").direction = 'UP'
+        row.operator("lightingmod.layer_move", icon='TRIA_DOWN', text="").direction = 'DOWN'
+        
+        # Place both Baking operators together
+        row.operator("lightingmod.bake_colors",icon='RENDER_STILL',text="Colors")
+        row.operator("lightingmod.bake_positions", icon='CON_LOCLIKE', text="Positions")
+        
+        # Disable interaction with the layer list and properties during a swap
+        list_col = box.column()
+        list_col.enabled = not sc.needs_layer_rebuild
+        list_col.template_list("LIGHTINGMOD_UL_layers","",sc,"ly_layers",sc,"ly_layers_index",rows=3)
+        list_col.operator("lightingmod.redraw_nodes",icon='FILE_REFRESH',text="Redraw Nodes")
+        
         if L:
-            itm=L[idx]; box.prop(itm,"name",text=("Base Layer" if idx==0 else "Layer"))
-            if idx>0: box.prop(itm,"blend_mode"); box.prop(itm,"opacity")
+            props_col = box.column()
+            props_col.enabled = not sc.needs_layer_rebuild
+            itm=L[idx]; props_col.prop(itm,"name",text=("Base Layer" if idx==0 else "Layer"))
+            if idx>0: props_col.prop(itm,"blend_mode"); props_col.prop(itm,"opacity")
             key=f"Layer_{idx+1}"
-            if obj and key in obj.keys(): box.prop(obj,key,text="Layer Value")
+            if obj and key in obj.keys(): props_col.prop(obj,key,text="Layer Value")
+
+        # Wrap ALL remaining UI in a column so the Lock greys it out entirely
+        main_col = layout.column()
+        main_col.enabled = not sc.needs_layer_rebuild
 
         # Batch Color
-        box=layout.box(); box.label(text="Batch Color")
+        box=main_col.box(); box.label(text="Batch Color")
         box.prop(sc,"batch_target_layer",text="Target Layer")
         row=box.row(align=True)
         row.prop(sc,"batch_primary_color",text="")
@@ -66,10 +90,11 @@ class LIGHTINGMOD_PT_panel(bpy.types.Panel):
         col.operator("lightingmod.undo_last_edit",    text="Undo Last Edit")
 
         # Effectors
-        box=layout.box(); box.label(text="Effectors")
+        box=main_col.box(); box.label(text="Effectors")
         box.prop(sc,"effector_target_layer",text="Target Layer")
         box.prop(sc,"effector_type",       text="Type")
         box.prop(sc,"effector_selection_mode", text="Apply To")
+        box.prop(sc,"effector_absolute_position", text="Absolute Position") # <--- Dedicated Vector
 
         tp = sc.effector_type
         if tp not in {'GRADIENT','OFFSET'}:

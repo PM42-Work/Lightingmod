@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Advanced Lighting",
     "author": "Raghuvansh Agarwal",
-    "version": (1, 3, 1),
+    "version": (1, 4, 0),
     "blender": (4, 1, 0),
     "location": "View3D > Sidebar > Advanced Lighting",
     "description": "Modular advanced drone color & effector controls",
@@ -105,6 +105,10 @@ def register():
     sc.domain_object = PointerProperty(name="Domain Object", type=bpy.types.Object)
     sc.effector_duration = IntProperty(name="Duration", default=10, min=0)
 
+    # --- NEW PROPERTIES ---
+    sc.effector_absolute_position = FloatVectorProperty(name="Absolute Position", subtype='TRANSLATION', size=3, default=(0.0, 0.0, 0.0))
+    sc.needs_layer_rebuild = BoolProperty(default=False)
+
     sc.effector_colors = CollectionProperty(type=properties.LightingModEffectorColorItem)
     sc.effector_colors_index = IntProperty(default=0)
 
@@ -168,6 +172,8 @@ def unregister():
     del bpy.types.Scene.effector_selected_only
     del bpy.types.Scene.domain_object
     del bpy.types.Scene.effector_duration
+    del bpy.types.Scene.effector_absolute_position # <--- Clean up absolute position
+    del bpy.types.Scene.needs_layer_rebuild        # <--- Clean up UI lock flag
     del bpy.types.Scene.effector_colors
     del bpy.types.Scene.effector_colors_index
     del bpy.types.Scene.new_uv_map_name

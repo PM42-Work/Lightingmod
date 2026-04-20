@@ -4,6 +4,7 @@ from . import utils
 
 class LightingModLayerItem(bpy.types.PropertyGroup):
     name: StringProperty(name="Name", default="Layer")
+    data_source: StringProperty(name="Data Source") # <--- NEW HIDDEN POINTER
     blend_mode: EnumProperty(
         name="Blend Mode",
         items=[(k,k.title(),"") for k in utils.BLEND_MAP.keys()],
@@ -21,7 +22,6 @@ class LightingModEffectorColorItem(bpy.types.PropertyGroup):
         min=0.0, max=1.0, default=(1,1,1,1)
     )
 
-# --- NEW: Temporal Stages ---
 class LightingModTemporalStage(bpy.types.PropertyGroup):
     name: StringProperty(name="Name", default="Stage")
     transition: IntProperty(name="Transition", min=1, default=10)
@@ -29,7 +29,6 @@ class LightingModTemporalStage(bpy.types.PropertyGroup):
     colors: CollectionProperty(type=LightingModEffectorColorItem)
     colors_index: IntProperty(default=0)
 
-# --- NEW: Formations ---
 class LightingModDroneRef(bpy.types.PropertyGroup):
     object_name: StringProperty(name="Object")
 
