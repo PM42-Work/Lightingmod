@@ -3,12 +3,19 @@ from . import utils
 
 class LIGHTINGMOD_UL_layers(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        sc = context.scene
         row = layout.row(align=True)
+        
         row.label(text=f"{index+1}: {item.name}")
+        
+        # Disable Mute/Solo toggles during a rebuild so they don't misfire on the wrong nodes
+        btn_row = row.row(align=True)
+        btn_row.enabled = not sc.needs_layer_rebuild 
+        
         solo_icon = 'RADIOBUT_ON' if item.solo else 'RADIOBUT_OFF'
-        row.operator("lightingmod.layer_toggle_solo", text="", icon=solo_icon).index = index
+        btn_row.operator("lightingmod.layer_toggle_solo", text="", icon=solo_icon).index = index
         mute_icon = 'MUTE_IPO_ON' if item.mute else 'MUTE_IPO_OFF'
-        row.operator("lightingmod.layer_toggle_mute", text="", icon=mute_icon).index = index
+        btn_row.operator("lightingmod.layer_toggle_mute", text="", icon=mute_icon).index = index
 
 class LIGHTINGMOD_UL_effector_colors(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
@@ -41,29 +48,37 @@ class LIGHTINGMOD_PT_panel(bpy.types.Panel):
         # --- 1. LAYERS BLOCK ---
         box=layout.box(); box.label(text="Layers")
         
-        # If needs rebuilding, show the Big Apply Button and lock everything else!
+        # If needs rebuilding, show the Big Apply Button
         if sc.needs_layer_rebuild:
             box.operator("lightingmod.apply_layer_order", text="Apply Layer Order", icon='ERROR')
             
         row=box.row(align=True)
-        row.enabled = not sc.needs_layer_rebuild # UI Lock!
         
-        row.operator("lightingmod.layer_add",icon='ADD',text="")
-        row.operator("lightingmod.layer_remove",icon='REMOVE',text="")
+        # Add / Remove (Locked during reorder)
+        add_rm_row = row.row(align=True)
+        add_rm_row.enabled = not sc.needs_layer_rebuild 
+        add_rm_row.operator("lightingmod.layer_add",icon='ADD',text="")
+        add_rm_row.operator("lightingmod.layer_remove",icon='REMOVE',text="")
         
+        # Move Up / Down (ALWAYS ENABLED)
         row.operator("lightingmod.layer_move", icon='TRIA_UP', text="").direction = 'UP'
         row.operator("lightingmod.layer_move", icon='TRIA_DOWN', text="").direction = 'DOWN'
         
-        # Place both Baking operators together
-        row.operator("lightingmod.bake_colors",icon='RENDER_STILL',text="Colors")
-        row.operator("lightingmod.bake_positions", icon='CON_LOCLIKE', text="Positions")
+        # Baking (Locked during reorder)
+        bake_row = box.row(align=True)
+        bake_row.enabled = not sc.needs_layer_rebuild
+        bake_row.operator("lightingmod.bake_colors",icon='RENDER_STILL',text="Colors")
+        bake_row.operator("lightingmod.bake_positions", icon='CON_LOCLIKE', text="Positions")
         
-        # Disable interaction with the layer list and properties during a swap
-        list_col = box.column()
-        list_col.enabled = not sc.needs_layer_rebuild
-        list_col.template_list("LIGHTINGMOD_UL_layers","",sc,"ly_layers",sc,"ly_layers_index",rows=3)
-        list_col.operator("lightingmod.redraw_nodes",icon='FILE_REFRESH',text="Redraw Nodes")
+        # The List itself (ALWAYS ENABLED so you can click and select items to move)
+        box.template_list("LIGHTINGMOD_UL_layers","",sc,"ly_layers",sc,"ly_layers_index",rows=3)
         
+        # Redraw Nodes (Locked during reorder)
+        redraw_row = box.row()
+        redraw_row.enabled = not sc.needs_layer_rebuild
+        redraw_row.operator("lightingmod.redraw_nodes",icon='FILE_REFRESH',text="Redraw Nodes")
+        
+        # Layer Properties (Locked during reorder)
         if L:
             props_col = box.column()
             props_col.enabled = not sc.needs_layer_rebuild
@@ -94,7 +109,6 @@ class LIGHTINGMOD_PT_panel(bpy.types.Panel):
         box.prop(sc,"effector_target_layer",text="Target Layer")
         box.prop(sc,"effector_type",       text="Type")
         box.prop(sc,"effector_selection_mode", text="Apply To")
-        box.prop(sc,"effector_absolute_position", text="Absolute Position") # <--- Dedicated Vector
 
         tp = sc.effector_type
         if tp not in {'GRADIENT','OFFSET'}:
