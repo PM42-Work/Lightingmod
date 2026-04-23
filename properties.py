@@ -4,7 +4,7 @@ from . import utils
 
 class LightingModLayerItem(bpy.types.PropertyGroup):
     name: StringProperty(name="Name", default="Layer")
-    data_source: StringProperty(name="Data Source") # <--- NEW HIDDEN POINTER
+    data_source: StringProperty(name="Data Source")
     blend_mode: EnumProperty(
         name="Blend Mode",
         items=[(k,k.title(),"") for k in utils.BLEND_MAP.keys()],
@@ -29,6 +29,19 @@ class LightingModTemporalStage(bpy.types.PropertyGroup):
     colors: CollectionProperty(type=LightingModEffectorColorItem)
     colors_index: IntProperty(default=0)
 
+# --- NEW: Compound Spark Profile ---
+class LightingModSparkProfile(bpy.types.PropertyGroup):
+    name: StringProperty(name="Profile Name", default="Profile")
+    style: EnumProperty(
+        name="Style",
+        items=[('PULSE', 'Pulse', ''), ('TWINKLE', 'Twinkle', '')],
+        default='PULSE'
+    )
+    weight: FloatProperty(name="Weight", min=0.0, default=1.0)
+    lifespan: IntProperty(name="Lifespan", min=1, default=10)
+    colors: CollectionProperty(type=LightingModEffectorColorItem)
+    colors_index: IntProperty(default=0)
+
 class LightingModDroneRef(bpy.types.PropertyGroup):
     object_name: StringProperty(name="Object")
 
@@ -46,6 +59,7 @@ classes = (
     LightingModLayerItem,
     LightingModEffectorColorItem,
     LightingModTemporalStage,
+    LightingModSparkProfile, # <--- Registered here
     LightingModDroneRef,
     LightingModDroneGroup,
     LightingModFormation,

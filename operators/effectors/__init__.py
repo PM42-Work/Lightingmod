@@ -1,9 +1,9 @@
-from . import gradient, sparkle, domain, movie, offset, management, temporal
+from . import gradient, sparkle, domain, movie, offset, management, temporal, noise
 
 classes = (
     gradient.LIGHTINGMOD_OT_draw_gradient,
     gradient.LIGHTINGMOD_OT_create_gradient_nodegroup,
-    gradient.LIGHTINGMOD_OT_flip_color_ramp, # <--- NEW
+    gradient.LIGHTINGMOD_OT_flip_color_ramp, 
     
     sparkle.LIGHTINGMOD_OT_sparkle_effector,
     
@@ -22,9 +22,18 @@ classes = (
     management.LIGHTINGMOD_OT_set_start_frame,
     management.LIGHTINGMOD_OT_set_end_frame,
     
+    # --- NEW: Registered Profile Operators ---
+    management.LIGHTINGMOD_OT_spark_profile_add,
+    management.LIGHTINGMOD_OT_spark_profile_remove,
+    
     temporal.LIGHTINGMOD_OT_temporal_sparkle,
     temporal.LIGHTINGMOD_OT_stage_add,
     temporal.LIGHTINGMOD_OT_stage_remove,
+
+    management.LIGHTINGMOD_OT_create_noise_nodegroup,
+    management.LIGHTINGMOD_OT_draw_noise_flow,
+
+    noise.LIGHTINGMOD_OT_noise_effector,
 )
 
 def register():

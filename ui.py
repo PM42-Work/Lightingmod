@@ -37,6 +37,13 @@ class LIGHTINGMOD_UL_temporal_stages(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.prop(item, "name", text="", emboss=False, icon='TIME')
 
+# --- NEW: Profile UIList ---
+class LIGHTINGMOD_UL_spark_profiles(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        row = layout.row(align=True)
+        row.prop(item, "name", text="", emboss=False, icon='SHADERFX')
+        row.label(text=item.style.capitalize())
+
 
 class LIGHTINGMOD_PT_panel(bpy.types.Panel):
     bl_label="Advanced Lighting"; bl_space_type='VIEW_3D'; bl_region_type='UI'; bl_category="Advanced Lighting"
@@ -120,25 +127,101 @@ class LIGHTINGMOD_PT_panel(bpy.types.Panel):
             row.operator("lightingmod.set_end_frame",  icon='NEXT_KEYFRAME',text="")
 
         if tp=='SPARKLE':
-            box.prop(sc,"effector_transition",text="Transition")
-            box.prop(sc,"effector_influence",text="Influence")
-            box.template_list("LIGHTINGMOD_UL_effector_colors","",sc,"effector_colors",sc,"effector_colors_index",rows=3)
-            row=box.row(align=True)
-            row.operator("lightingmod.effector_color_add",icon='ADD',text=""); row.operator("lightingmod.effector_color_remove",icon='REMOVE',text="")
-            box.operator("lightingmod.effector_monochrome",text="Monochrome")
+            # Global Settings
+            box.prop(sc, "effector_influence", text="Density")
+            
+            box.prop(sc, "use_advanced_spark_profiles", text="Use Multiple Profiles", icon='TRIA_DOWN' if sc.use_advanced_spark_profiles else 'TRIA_RIGHT')
+            
+            if not sc.spark_profiles:
+                # Fallback button in case they migrate an old project file
+                box.operator("lightingmod.spark_profile_add", text="Initialize Base Profile", icon='ADD')
+            else:
+                if sc.use_advanced_spark_profiles:
+                    # --- ADVANCED MODE ---
+                    box.label(text="Profiles")
+                    box.template_list("LIGHTINGMOD_UL_spark_profiles", "", sc, "spark_profiles", sc, "spark_profiles_index", rows=3)
+                    row = box.row(align=True)
+                    row.operator("lightingmod.spark_profile_add", icon='ADD', text="")
+                    row.operator("lightingmod.spark_profile_remove", icon='REMOVE', text="")
+
+                    if sc.spark_profiles:
+                        prof = sc.spark_profiles[sc.spark_profiles_index]
+                        p_box = box.box()
+                        p_box.label(text=f"Editing: {prof.name}")
+                        p_box.prop(prof, "style", text="Style")
+                        p_box.prop(prof, "weight", text="Relative Weight")
+                        p_box.prop(prof, "lifespan", text="Lifespan (Frames)")
+                        
+                        p_box.template_list("LIGHTINGMOD_UL_effector_colors", "", prof, "colors", prof, "colors_index", rows=2)
+                        row = p_box.row(align=True)
+                        op = row.operator("lightingmod.effector_color_add", icon='ADD', text="")
+                        op.target = 'SPARK_PROFILE'
+                        op = row.operator("lightingmod.effector_color_remove", icon='REMOVE', text="")
+                        op.target = 'SPARK_PROFILE'
+                else:
+                    # --- SIMPLE MODE ---
+                    # Always display the base profile to keep it clean
+                    prof = sc.spark_profiles[0]
+                    
+                    box.prop(prof, "style", text="Style")
+                    box.prop(prof, "lifespan", text="Lifespan (Frames)")
+                    
+                    box.label(text="Colors")
+                    box.template_list("LIGHTINGMOD_UL_effector_colors", "", prof, "colors", prof, "colors_index", rows=3)
+                    row = box.row(align=True)
+                    op = row.operator("lightingmod.effector_color_add", icon='ADD', text="")
+                    op.target = 'SPARK_PROFILE'
+                    op = row.operator("lightingmod.effector_color_remove", icon='REMOVE', text="")
+                    op.target = 'SPARK_PROFILE'
 
         elif tp=='TEMPORAL_SPARKLE':
+            box.prop(sc, "sparkle_style")
             box.label(text="Temporal Stages")
             box.template_list("LIGHTINGMOD_UL_temporal_stages", "", sc, "temporal_stages", sc, "temporal_stages_index", rows=2)
             row = box.row(align=True)
             row.operator("lightingmod.stage_add", icon='ADD', text=""); row.operator("lightingmod.stage_remove", icon='REMOVE', text="")
             if sc.temporal_stages:
                 stage = sc.temporal_stages[sc.temporal_stages_index]
-                box.prop(stage, "transition"); box.prop(stage, "influence")
+                box.prop(stage, "transition", text="Lifespan"); box.prop(stage, "influence")
                 box.template_list("LIGHTINGMOD_UL_effector_colors", "", stage, "colors", stage, "colors_index", rows=3)
                 row=box.row(align=True)
                 op=row.operator("lightingmod.effector_color_add",icon='ADD',text=""); op.target='TEMPORAL_STAGE'
                 op=row.operator("lightingmod.effector_color_remove",icon='REMOVE',text=""); op.target='TEMPORAL_STAGE'
+
+        elif tp == 'NOISE':
+            # Shape
+            box.label(text="Shape")
+            box.prop(sc, "noise_type", text="")
+            box.prop(sc, "noise_scale")
+            box.prop(sc, "noise_contrast")
+            
+            # Motion
+            box.label(text="Motion")
+            row = box.row()
+            col = row.column(align=True)
+            col.prop(sc, "noise_direction", index=0, text="Flow X")
+            col.prop(sc, "noise_direction", index=1, text="Flow Y")
+            col.prop(sc, "noise_direction", index=2, text="Flow Z")
+            row.operator("lightingmod.draw_noise_flow", icon='BRUSH_DATA', text="Draw")
+            box.prop(sc, "noise_speed")
+            
+            # Fading
+            box.label(text="Fading (Frames)")
+            row = box.row(align=True)
+            row.prop(sc, "noise_fade_in", text="Fade In")
+            row.prop(sc, "noise_fade_out", text="Fade Out")
+            
+            # Colors
+            box.label(text="Colors")
+            ng = bpy.data.node_groups.get("LightingModNoiseRamp")
+            if ng and "Ramp" in ng.nodes: 
+                ramp_node = ng.nodes["Ramp"]
+                row = box.row(align=True)
+                row.prop(ramp_node.color_ramp, "color_mode", text="")
+                row.prop(ramp_node.color_ramp, "interpolation", text="")
+                box.template_color_ramp(ramp_node, "color_ramp")
+            else: 
+                box.operator("lightingmod.create_noise_nodegroup", text="Create Ramp")
 
         elif tp in {'GRADIENT', 'OFFSET'}:
             box.prop(sc, "gradient_mode", text="Mode")
@@ -148,8 +231,17 @@ class LIGHTINGMOD_PT_panel(bpy.types.Panel):
             
             if tp == 'GRADIENT':
                 ng = bpy.data.node_groups.get("LightingModGradient")
-                if ng and "Ramp" in ng.nodes: box.template_color_ramp(ng.nodes["Ramp"], "color_ramp")
-                else: box.operator("lightingmod.create_gradient_nodegroup", text="Create Ramp")
+                if ng and "Ramp" in ng.nodes: 
+                    ramp_node = ng.nodes["Ramp"]
+                    
+                    # --- NEW: Expose the Color Mode dropdowns ---
+                    row = box.row(align=True)
+                    row.prop(ramp_node.color_ramp, "color_mode", text="")
+                    row.prop(ramp_node.color_ramp, "interpolation", text="")
+                    
+                    box.template_color_ramp(ramp_node, "color_ramp")
+                else: 
+                    box.operator("lightingmod.create_gradient_nodegroup", text="Create Ramp")
                 
                 box.operator("lightingmod.flip_color_ramp", icon='FILE_REFRESH', text="Flip Gradient Colors")
                 
@@ -214,6 +306,7 @@ class LIGHTINGMOD_PT_export(bpy.types.Panel):
 classes = (
     LIGHTINGMOD_UL_layers, LIGHTINGMOD_UL_effector_colors,
     LIGHTINGMOD_UL_formations, LIGHTINGMOD_UL_groups, LIGHTINGMOD_UL_group_drones, LIGHTINGMOD_UL_temporal_stages,
+    LIGHTINGMOD_UL_spark_profiles,
     LIGHTINGMOD_PT_panel, LIGHTINGMOD_PT_drone_groups, LIGHTINGMOD_PT_export,
 )
 
