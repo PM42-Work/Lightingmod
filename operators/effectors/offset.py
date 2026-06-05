@@ -42,8 +42,8 @@ class ADVLIGHTING_OT_draw_offset_line(bpy.types.Operator):
             else:
                 self.second = loc
                 sc = context.scene
-                sc.offset_line_start = self.first
-                sc.offset_line_end = self.second
+                sc.adv_offset_line_start = self.first
+                sc.adv_offset_line_end = self.second
                 self.report({'INFO'}, "Offset line set")
                 return {'FINISHED'}
         
@@ -58,19 +58,19 @@ class ADVLIGHTING_OT_offset_keyframes(bpy.types.Operator):
     def execute(self, context):
         sc = context.scene
         
-        # 1. Determine Target Layer Path (e.g. '["Layer_1"]')
+        # 1. Determine Target Layer Path
         target_idx = int(sc.adv_effector_target_layer) + 1
         target_path = f'["Layer_{target_idx}"]'
         
         # Init Evaluator
-        evaluator = EffectorEvaluator(context, sc.adv_gradient_mode, sc.offset_line_start, sc.offset_line_end,
-                                      sc.curve_object, sc.curve_radius, sc.curve_mode)
+        evaluator = EffectorEvaluator(context, sc.adv_gradient_mode, sc.adv_offset_line_start, sc.adv_offset_line_end,
+                                      sc.adv_curve_object, sc.adv_curve_radius, sc.adv_curve_mode)
 
         # Collect Objects
         objs = []
-        if sc.adv_effector_selection_mode == 'GROUP' and sc.drone_formations:
-             if sc.drone_formations[sc.drone_formations_index].groups:
-                 g = sc.drone_formations[sc.drone_formations_index].groups[sc.drone_formations[sc.drone_formations_index].groups_index]
+        if sc.adv_effector_selection_mode == 'GROUP' and sc.adv_drone_formations:
+             if sc.adv_drone_formations[sc.adv_drone_formations_index].groups:
+                 g = sc.adv_drone_formations[sc.adv_drone_formations_index].groups[sc.adv_drone_formations[sc.adv_drone_formations_index].groups_index]
                  objs = [bpy.data.objects.get(d.object_name) for d in g.drones if bpy.data.objects.get(d.object_name)]
         else:
              objs = context.selected_objects
@@ -92,7 +92,6 @@ class ADVLIGHTING_OT_offset_keyframes(bpy.types.Operator):
             if not ad or not ad.action: continue
 
             for fcu in ad.action.fcurves:
-                # --- FIX: Strict Layer Targeting ---
                 if fcu.data_path != target_path: continue
                 
                 curve_modified = False

@@ -17,8 +17,8 @@ class ADVLIGHTING_OT_stage_add(bpy.types.Operator):
     bl_label = "Add Stage"
     def execute(self, context):
         sc = context.scene
-        st = sc.temporal_stages.add()
-        st.name = f"Stage {len(sc.temporal_stages)}"
+        st = sc.adv_temporal_stages.add()
+        st.name = f"Stage {len(sc.adv_temporal_stages)}"
         return {'FINISHED'}
 
 class ADVLIGHTING_OT_stage_remove(bpy.types.Operator):
@@ -26,7 +26,7 @@ class ADVLIGHTING_OT_stage_remove(bpy.types.Operator):
     bl_label = "Remove Stage"
     def execute(self, context):
         sc = context.scene
-        if sc.temporal_stages:
-            sc.temporal_stages.remove(sc.temporal_stages_index)
-            sc.temporal_stages_index = max(0, sc.temporal_stages_index - 1)
+        if sc.adv_temporal_stages:
+            sc.adv_temporal_stages.remove(sc.adv_temporal_stages_index)
+            sc.adv_temporal_stages_index = max(0, sc.adv_temporal_stages_index - 1)
         return {'FINISHED'}

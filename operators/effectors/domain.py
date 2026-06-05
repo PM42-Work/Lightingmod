@@ -6,7 +6,7 @@ class ADVLIGHTING_OT_domain_effector(bpy.types.Operator):
     bl_idname="advlighting.domain"; bl_label="Domain"
     def execute(self, context):
         sc=context.scene; start=sc.adv_effector_start; end=sc.adv_effector_end; trans=sc.adv_effector_transition
-        dom=sc.domain_object; drones=[o for o in context.selected_objects if o.get("md_sphere") and o.type=='MESH']
+        dom=sc.adv_domain_object; drones=[o for o in context.selected_objects if o.get("md_sphere") and o.type=='MESH']
         if not dom: return {'CANCELLED'}
         
         bbox=[dom.matrix_world @ mathutils.Vector(c) for c in dom.bound_box]
