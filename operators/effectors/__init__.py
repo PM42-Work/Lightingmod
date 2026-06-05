@@ -10,19 +10,18 @@ classes = (
     domain.ADVLIGHTING_OT_domain_effector,
     
     movie.ADVLIGHTING_OT_movie_sampler,
-    movie.ADVLIGHTING_OT_generate_uv,
+    # (generate_uv was removed from here)
     
     offset.ADVLIGHTING_OT_draw_offset_line,
     offset.ADVLIGHTING_OT_offset_keyframes,
     
     management.ADVLIGHTING_OT_apply_effectors,
+    management.ADVLIGHTING_OT_sample_drone_colors, # <--- Added!
     management.ADVLIGHTING_OT_effector_color_add,
     management.ADVLIGHTING_OT_effector_color_remove,
     management.ADVLIGHTING_OT_effector_monochrome,
     management.ADVLIGHTING_OT_set_start_frame,
     management.ADVLIGHTING_OT_set_end_frame,
-    
-    # --- NEW: Registered Profile Operators ---
     management.ADVLIGHTING_OT_spark_profile_add,
     management.ADVLIGHTING_OT_spark_profile_remove,
     
