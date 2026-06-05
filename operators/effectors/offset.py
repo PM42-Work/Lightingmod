@@ -5,8 +5,8 @@ from bpy_extras import view3d_utils
 from ... import utils
 from .evaluator import EffectorEvaluator
 
-class LIGHTINGMOD_OT_draw_offset_line(bpy.types.Operator):
-    bl_idname = "lightingmod.draw_offset_line"
+class ADVLIGHTING_OT_draw_offset_line(bpy.types.Operator):
+    bl_idname = "advlighting.draw_offset_line"
     bl_label  = "Draw Offset Line"
     bl_description = "Click two points to define the stagger axis"
     first:  FloatVectorProperty()
@@ -51,24 +51,24 @@ class LIGHTINGMOD_OT_draw_offset_line(bpy.types.Operator):
             return {'CANCELLED'}
         return {'RUNNING_MODAL'}
 
-class LIGHTINGMOD_OT_offset_keyframes(bpy.types.Operator):
-    bl_idname = "lightingmod.offset_keyframes"
+class ADVLIGHTING_OT_offset_keyframes(bpy.types.Operator):
+    bl_idname = "advlighting.offset_keyframes"
     bl_label  = "Offset Keyframes"
     
     def execute(self, context):
         sc = context.scene
         
         # 1. Determine Target Layer Path (e.g. '["Layer_1"]')
-        target_idx = int(sc.effector_target_layer) + 1
+        target_idx = int(sc.adv_effector_target_layer) + 1
         target_path = f'["Layer_{target_idx}"]'
         
         # Init Evaluator
-        evaluator = EffectorEvaluator(context, sc.gradient_mode, sc.offset_line_start, sc.offset_line_end,
+        evaluator = EffectorEvaluator(context, sc.adv_gradient_mode, sc.offset_line_start, sc.offset_line_end,
                                       sc.curve_object, sc.curve_radius, sc.curve_mode)
 
         # Collect Objects
         objs = []
-        if sc.effector_selection_mode == 'GROUP' and sc.drone_formations:
+        if sc.adv_effector_selection_mode == 'GROUP' and sc.drone_formations:
              if sc.drone_formations[sc.drone_formations_index].groups:
                  g = sc.drone_formations[sc.drone_formations_index].groups[sc.drone_formations[sc.drone_formations_index].groups_index]
                  objs = [bpy.data.objects.get(d.object_name) for d in g.drones if bpy.data.objects.get(d.object_name)]
@@ -85,7 +85,7 @@ class LIGHTINGMOD_OT_offset_keyframes(bpy.types.Operator):
             if not valid: continue
             
             # Integer Rounding Fix
-            offs = int(round(t * sc.effector_duration))
+            offs = int(round(t * sc.adv_effector_duration))
             if offs == 0: continue
 
             ad = obj.animation_data

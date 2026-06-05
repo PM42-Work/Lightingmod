@@ -1,313 +1,303 @@
 import bpy
 from . import utils
 
-class LIGHTINGMOD_UL_layers(bpy.types.UIList):
+class ADVLIGHTING_UL_layers(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        sc = context.scene
-        row = layout.row(align=True)
-        
+        sc = context.scene; row = layout.row(align=True)
         row.label(text=f"{index+1}: {item.name}")
-        
-        # Disable Mute/Solo toggles during a rebuild so they don't misfire on the wrong nodes
-        btn_row = row.row(align=True)
-        btn_row.enabled = not sc.needs_layer_rebuild 
-        
+        btn_row = row.row(align=True); btn_row.enabled = not sc.adv_needs_layer_rebuild 
         solo_icon = 'RADIOBUT_ON' if item.solo else 'RADIOBUT_OFF'
-        btn_row.operator("lightingmod.layer_toggle_solo", text="", icon=solo_icon).index = index
+        btn_row.operator("advlighting.layer_toggle_solo", text="", icon=solo_icon).index = index
         mute_icon = 'MUTE_IPO_ON' if item.mute else 'MUTE_IPO_OFF'
-        btn_row.operator("lightingmod.layer_toggle_mute", text="", icon=mute_icon).index = index
+        btn_row.operator("advlighting.layer_toggle_mute", text="", icon=mute_icon).index = index
 
-class LIGHTINGMOD_UL_effector_colors(bpy.types.UIList):
+class ADVLIGHTING_UL_color_palettes(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        row = layout.row(align=True)
+        row.prop(item, "color", text="", emboss=True); row.prop(item, "name", text="", emboss=False)
+
+class ADVLIGHTING_UL_gradient_palettes(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.prop(item, "name", text="", emboss=False, icon='COLOR')
+
+class ADVLIGHTING_UL_effector_colors(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.prop(item, "color", text="", emboss=True)
 
-class LIGHTINGMOD_UL_formations(bpy.types.UIList):
+class ADVLIGHTING_UL_formations(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.prop(item, "name", text="", emboss=False, icon='OUTLINER_COLLECTION')
 
-class LIGHTINGMOD_UL_groups(bpy.types.UIList):
+class ADVLIGHTING_UL_groups(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.prop(item, "name", text="", emboss=False, icon='GROUP')
 
-class LIGHTINGMOD_UL_group_drones(bpy.types.UIList):
+class ADVLIGHTING_UL_group_drones(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.label(text=item.object_name, icon='MESH_UVSPHERE')
 
-class LIGHTINGMOD_UL_temporal_stages(bpy.types.UIList):
+class ADVLIGHTING_UL_temporal_stages(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.prop(item, "name", text="", emboss=False, icon='TIME')
 
-# --- NEW: Profile UIList ---
-class LIGHTINGMOD_UL_spark_profiles(bpy.types.UIList):
+class ADVLIGHTING_UL_spark_profiles(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
-        row.prop(item, "name", text="", emboss=False, icon='SHADERFX')
-        row.label(text=item.style.capitalize())
+        row.prop(item, "name", text="", emboss=False, icon='SHADERFX'); row.label(text=item.style.capitalize())
 
-
-class LIGHTINGMOD_PT_panel(bpy.types.Panel):
-    bl_label="Advanced Lighting"; bl_space_type='VIEW_3D'; bl_region_type='UI'; bl_category="Advanced Lighting"
+class ADVLIGHTING_PT_panel(bpy.types.Panel):
+    bl_label="Advanced Lighting V3"; bl_space_type='VIEW_3D'; bl_region_type='UI'; bl_category="Advanced Lighting"
 
     def draw(self, context):
-        sc=context.scene; obj=context.object; L=sc.ly_layers; idx=L and sc.ly_layers_index
-        layout=self.layout
+        sc=context.scene; obj=context.object; L=sc.adv_layers; idx=L and sc.adv_layers_index; layout=self.layout
 
-        # --- 1. LAYERS BLOCK ---
+        # --- LAYERS BLOCK ---
         box=layout.box(); box.label(text="Layers")
-        
-        # If needs rebuilding, show the Big Apply Button
-        if sc.needs_layer_rebuild:
-            box.operator("lightingmod.apply_layer_order", text="Apply Layer Order", icon='ERROR')
+        if sc.adv_needs_layer_rebuild:
+            box.operator("advlighting.apply_layer_order", text="Apply Layer Order", icon='ERROR')
             
         row=box.row(align=True)
+        add_rm_row = row.row(align=True); add_rm_row.enabled = not sc.adv_needs_layer_rebuild 
+        add_rm_row.operator("advlighting.layer_add",icon='ADD',text="")
+        add_rm_row.operator("advlighting.layer_remove",icon='REMOVE',text="")
         
-        # Add / Remove (Locked during reorder)
-        add_rm_row = row.row(align=True)
-        add_rm_row.enabled = not sc.needs_layer_rebuild 
-        add_rm_row.operator("lightingmod.layer_add",icon='ADD',text="")
-        add_rm_row.operator("lightingmod.layer_remove",icon='REMOVE',text="")
+        row.operator("advlighting.layer_move", icon='TRIA_UP', text="").direction = 'UP'
+        row.operator("advlighting.layer_move", icon='TRIA_DOWN', text="").direction = 'DOWN'
         
-        # Move Up / Down (ALWAYS ENABLED)
-        row.operator("lightingmod.layer_move", icon='TRIA_UP', text="").direction = 'UP'
-        row.operator("lightingmod.layer_move", icon='TRIA_DOWN', text="").direction = 'DOWN'
+        bake_row = box.row(align=True); bake_row.enabled = not sc.adv_needs_layer_rebuild
         
-        # Baking (Locked during reorder)
-        bake_row = box.row(align=True)
-        bake_row.enabled = not sc.needs_layer_rebuild
-        bake_row.operator("lightingmod.bake_colors",icon='RENDER_STILL',text="Colors")
-        bake_row.operator("lightingmod.bake_positions", icon='CON_LOCLIKE', text="Positions")
+        # Modified Bake UI: Targets the base layer for final export!
+        bake_col = bake_row.column(align=True)
+        r = bake_col.row(align=True)
+        r.prop(sc, "adv_bake_start", text="Bake Start")
+        r.operator("advlighting.set_bake_start", icon='PREV_KEYFRAME', text="")
+        r = bake_col.row(align=True)
+        r.prop(sc, "adv_bake_end", text="Bake End")
+        r.operator("advlighting.set_bake_end", icon='NEXT_KEYFRAME', text="")
         
-        # The List itself (ALWAYS ENABLED so you can click and select items to move)
-        box.template_list("LIGHTINGMOD_UL_layers","",sc,"ly_layers",sc,"ly_layers_index",rows=3)
+        br = bake_col.row(align=True)
+        br.operator("advlighting.bake_colors",icon='RENDER_STILL',text="Bake Mix to Base")
+        br.operator("advlighting.bake_positions", icon='CON_LOCLIKE', text="Bake Positions")
         
-        # Redraw Nodes (Locked during reorder)
-        redraw_row = box.row()
-        redraw_row.enabled = not sc.needs_layer_rebuild
-        redraw_row.operator("lightingmod.redraw_nodes",icon='FILE_REFRESH',text="Redraw Nodes")
+        box.template_list("ADVLIGHTING_UL_layers","",sc,"adv_layers",sc,"adv_layers_index",rows=3)
         
-        # Layer Properties (Locked during reorder)
+        redraw_row = box.row(); redraw_row.enabled = not sc.adv_needs_layer_rebuild
+        redraw_row.operator("advlighting.redraw_nodes",icon='FILE_REFRESH',text="Redraw Nodes")
+        
         if L:
-            props_col = box.column()
-            props_col.enabled = not sc.needs_layer_rebuild
+            props_col = box.column(); props_col.enabled = not sc.adv_needs_layer_rebuild
             itm=L[idx]; props_col.prop(itm,"name",text=("Base Layer" if idx==0 else "Layer"))
             if idx>0: props_col.prop(itm,"blend_mode"); props_col.prop(itm,"opacity")
-            key=f"Layer_{idx+1}"
-            if obj and key in obj.keys(): props_col.prop(obj,key,text="Layer Value")
 
-        # Wrap ALL remaining UI in a column so the Lock greys it out entirely
-        main_col = layout.column()
-        main_col.enabled = not sc.needs_layer_rebuild
+        main_col = layout.column(); main_col.enabled = not sc.adv_needs_layer_rebuild
 
-        # Batch Color
+        # --- BATCH COLOR ---
         box=main_col.box(); box.label(text="Batch Color")
-        box.prop(sc,"batch_target_layer",text="Target Layer")
+        box.prop(sc,"adv_batch_target_layer",text="Target Layer")
         row=box.row(align=True)
-        row.prop(sc,"batch_primary_color",text="")
-        row.operator("lightingmod.swap_batch_colors",icon='FILE_REFRESH',text="")
-        row.prop(sc,"batch_secondary_color",text="")
+        row.prop(sc,"adv_batch_primary_color",text="")
+        row.operator("advlighting.swap_batch_colors",icon='FILE_REFRESH',text="")
+        row.prop(sc,"adv_batch_secondary_color",text="")
         col=box.column(align=True)
-        col.operator("lightingmod.batch_color_keyframe",text="Color & Keyframe")
-        col.operator("lightingmod.batch_color",       text="Color Only")
-        col.operator("lightingmod.keyframe_current",  text="Keyframe Current")
-        col.operator("lightingmod.undo_last_edit",    text="Undo Last Edit")
+        col.operator("advlighting.batch_color_keyframe",text="Color & Keyframe")
+        col.operator("advlighting.batch_color",       text="Color Only")
+        col.operator("advlighting.keyframe_current",  text="Keyframe Current")
 
-        # Effectors
+        icon = 'TRIA_DOWN' if sc.adv_show_color_palettes else 'TRIA_RIGHT'
+        box.prop(sc, "adv_show_color_palettes", icon=icon, text="Color Palette", emboss=False)
+        if sc.adv_show_color_palettes:
+            pbox = box.box()
+            pbox.template_list("ADVLIGHTING_UL_color_palettes", "", sc, "adv_color_palettes", sc, "adv_color_palettes_index", rows=3)
+            row = pbox.row(align=True)
+            row.operator("advlighting.save_color", icon='ADD', text="Save Primary")
+            row.operator("advlighting.remove_color", icon='REMOVE', text="")
+            pbox.operator("advlighting.apply_color", icon='RESTRICT_COLOR_OFF', text="Set as Primary")
+
+        # --- EFFECTORS ---
         box=main_col.box(); box.label(text="Effectors")
-        box.prop(sc,"effector_target_layer",text="Target Layer")
-        box.prop(sc,"effector_type",       text="Type")
-        box.prop(sc,"effector_selection_mode", text="Apply To")
+        box.prop(sc,"adv_effector_target_layer",text="Target Layer")
+        box.prop(sc,"adv_effector_type",       text="Type")
+        box.prop(sc,"adv_effector_selection_mode", text="Apply To")
 
-        tp = sc.effector_type
+        tp = sc.adv_effector_type
         if tp not in {'GRADIENT','OFFSET'}:
             row=box.row(align=True)
-            row.prop(sc,"effector_start",text="Start")
-            row.prop(sc,"effector_end",  text="End")
+            row.prop(sc,"adv_effector_start",text="Start")
+            row.operator("advlighting.set_effector_start",icon='PREV_KEYFRAME',text="")
             row=box.row(align=True)
-            row.operator("lightingmod.set_start_frame",icon='PREV_KEYFRAME',text="")
-            row.operator("lightingmod.set_end_frame",  icon='NEXT_KEYFRAME',text="")
+            row.prop(sc,"adv_effector_end",  text="End")
+            row.operator("advlighting.set_effector_end",  icon='NEXT_KEYFRAME',text="")
 
         if tp=='SPARKLE':
-            # Global Settings
-            box.prop(sc, "effector_influence", text="Density")
+            box.prop(sc, "adv_effector_influence", text="Density")
+            box.row().prop(sc, "adv_color_source", expand=True)
             
-            box.prop(sc, "use_advanced_spark_profiles", text="Use Multiple Profiles", icon='TRIA_DOWN' if sc.use_advanced_spark_profiles else 'TRIA_RIGHT')
-            
-            if not sc.spark_profiles:
-                # Fallback button in case they migrate an old project file
-                box.operator("lightingmod.spark_profile_add", text="Initialize Base Profile", icon='ADD')
+            if sc.adv_color_source == 'SAMPLED':
+                pbox = box.box()
+                op = pbox.operator("advlighting.sample_drone_colors", icon='CAMERA_DATA')
+                op.target = 'SPARKLE'
+                pbox.label(text=f"Cached: {len(sc.adv_sampled_colors)} Drones", icon='INFO')
+                pbox.prop(sc, "adv_sparkle_style", text="Style")
+                pbox.prop(sc, "adv_effector_transition", text="Lifespan (Frames)")
             else:
-                if sc.use_advanced_spark_profiles:
-                    # --- ADVANCED MODE ---
-                    box.label(text="Profiles")
-                    box.template_list("LIGHTINGMOD_UL_spark_profiles", "", sc, "spark_profiles", sc, "spark_profiles_index", rows=3)
-                    row = box.row(align=True)
-                    row.operator("lightingmod.spark_profile_add", icon='ADD', text="")
-                    row.operator("lightingmod.spark_profile_remove", icon='REMOVE', text="")
-
-                    if sc.spark_profiles:
-                        prof = sc.spark_profiles[sc.spark_profiles_index]
-                        p_box = box.box()
-                        p_box.label(text=f"Editing: {prof.name}")
-                        p_box.prop(prof, "style", text="Style")
-                        p_box.prop(prof, "weight", text="Relative Weight")
-                        p_box.prop(prof, "lifespan", text="Lifespan (Frames)")
-                        
-                        p_box.template_list("LIGHTINGMOD_UL_effector_colors", "", prof, "colors", prof, "colors_index", rows=2)
-                        row = p_box.row(align=True)
-                        op = row.operator("lightingmod.effector_color_add", icon='ADD', text="")
-                        op.target = 'SPARK_PROFILE'
-                        op = row.operator("lightingmod.effector_color_remove", icon='REMOVE', text="")
-                        op.target = 'SPARK_PROFILE'
+                box.prop(sc, "adv_use_advanced_spark_profiles", text="Use Multiple Profiles", icon='TRIA_DOWN' if sc.adv_use_advanced_spark_profiles else 'TRIA_RIGHT')
+                if not sc.adv_spark_profiles:
+                    box.operator("advlighting.spark_profile_add", text="Initialize Base Profile", icon='ADD')
                 else:
-                    # --- SIMPLE MODE ---
-                    # Always display the base profile to keep it clean
-                    prof = sc.spark_profiles[0]
-                    
-                    box.prop(prof, "style", text="Style")
-                    box.prop(prof, "lifespan", text="Lifespan (Frames)")
-                    
-                    box.label(text="Colors")
-                    box.template_list("LIGHTINGMOD_UL_effector_colors", "", prof, "colors", prof, "colors_index", rows=3)
-                    row = box.row(align=True)
-                    op = row.operator("lightingmod.effector_color_add", icon='ADD', text="")
-                    op.target = 'SPARK_PROFILE'
-                    op = row.operator("lightingmod.effector_color_remove", icon='REMOVE', text="")
-                    op.target = 'SPARK_PROFILE'
+                    if sc.adv_use_advanced_spark_profiles:
+                        box.label(text="Profiles")
+                        box.template_list("ADVLIGHTING_UL_spark_profiles", "", sc, "adv_spark_profiles", sc, "adv_spark_profiles_index", rows=3)
+                        row = box.row(align=True)
+                        row.operator("advlighting.spark_profile_add", icon='ADD', text="")
+                        row.operator("advlighting.spark_profile_remove", icon='REMOVE', text="")
+                        if sc.adv_spark_profiles:
+                            prof = sc.adv_spark_profiles[sc.adv_spark_profiles_index]
+                            p_box = box.box(); p_box.label(text=f"Editing: {prof.name}")
+                            p_box.prop(prof, "style", text="Style"); p_box.prop(prof, "weight", text="Relative Weight"); p_box.prop(prof, "lifespan", text="Lifespan (Frames)")
+                            p_box.template_list("ADVLIGHTING_UL_effector_colors", "", prof, "colors", prof, "colors_index", rows=2)
+                            row = p_box.row(align=True)
+                            op = row.operator("advlighting.effector_color_add", icon='ADD', text=""); op.target = 'SPARK_PROFILE'
+                            op = row.operator("advlighting.effector_color_remove", icon='REMOVE', text=""); op.target = 'SPARK_PROFILE'
+                    else:
+                        prof = sc.adv_spark_profiles[0]
+                        box.prop(prof, "style", text="Style"); box.prop(prof, "lifespan", text="Lifespan (Frames)"); box.label(text="Colors")
+                        box.template_list("ADVLIGHTING_UL_effector_colors", "", prof, "colors", prof, "colors_index", rows=3)
+                        row = box.row(align=True)
+                        op = row.operator("advlighting.effector_color_add", icon='ADD', text=""); op.target = 'SPARK_PROFILE'
+                        op = row.operator("advlighting.effector_color_remove", icon='REMOVE', text=""); op.target = 'SPARK_PROFILE'
 
         elif tp=='TEMPORAL_SPARKLE':
-            box.prop(sc, "sparkle_style")
+            box.prop(sc, "adv_sparkle_style")
             box.label(text="Temporal Stages")
-            box.template_list("LIGHTINGMOD_UL_temporal_stages", "", sc, "temporal_stages", sc, "temporal_stages_index", rows=2)
+            box.template_list("ADVLIGHTING_UL_temporal_stages", "", sc, "adv_temporal_stages", sc, "adv_temporal_stages_index", rows=2)
             row = box.row(align=True)
-            row.operator("lightingmod.stage_add", icon='ADD', text=""); row.operator("lightingmod.stage_remove", icon='REMOVE', text="")
-            if sc.temporal_stages:
-                stage = sc.temporal_stages[sc.temporal_stages_index]
+            row.operator("advlighting.stage_add", icon='ADD', text=""); row.operator("advlighting.stage_remove", icon='REMOVE', text="")
+            if sc.adv_temporal_stages:
+                stage = sc.adv_temporal_stages[sc.adv_temporal_stages_index]
                 box.prop(stage, "transition", text="Lifespan"); box.prop(stage, "influence")
-                box.template_list("LIGHTINGMOD_UL_effector_colors", "", stage, "colors", stage, "colors_index", rows=3)
-                row=box.row(align=True)
-                op=row.operator("lightingmod.effector_color_add",icon='ADD',text=""); op.target='TEMPORAL_STAGE'
-                op=row.operator("lightingmod.effector_color_remove",icon='REMOVE',text=""); op.target='TEMPORAL_STAGE'
+                box.row().prop(stage, "color_source", expand=True)
+                if stage.color_source == 'SAMPLED':
+                    pbox = box.box()
+                    op = pbox.operator("advlighting.sample_drone_colors", icon='CAMERA_DATA')
+                    op.target = 'TEMPORAL'
+                    pbox.label(text=f"Cached: {len(stage.sampled_colors)} Drones", icon='INFO')
+                else:
+                    box.template_list("ADVLIGHTING_UL_effector_colors", "", stage, "colors", stage, "colors_index", rows=3)
+                    row=box.row(align=True)
+                    op=row.operator("advlighting.effector_color_add",icon='ADD',text=""); op.target='TEMPORAL_STAGE'
+                    op=row.operator("advlighting.effector_color_remove",icon='REMOVE',text=""); op.target='TEMPORAL_STAGE'
 
         elif tp == 'NOISE':
-            # Shape
             box.label(text="Shape")
-            box.prop(sc, "noise_type", text="")
-            box.prop(sc, "noise_scale")
-            box.prop(sc, "noise_contrast")
+            box.prop(sc, "adv_noise_type", text="")
             
-            # Motion
+            # Non-Uniform Noise Scaling UI
+            row = box.row(align=True)
+            if sc.adv_noise_scale_linked:
+                row.prop(sc, "adv_noise_scale_master", text="Scale")
+            else:
+                col = row.column(align=True)
+                col.prop(sc, "adv_noise_scale_xyz", index=0, text="X")
+                col.prop(sc, "adv_noise_scale_xyz", index=1, text="Y")
+                col.prop(sc, "adv_noise_scale_xyz", index=2, text="Z")
+            row.prop(sc, "adv_noise_scale_linked", icon='LINKED' if sc.adv_noise_scale_linked else 'UNLINKED', text="")
+            
+            box.prop(sc, "adv_noise_contrast")
             box.label(text="Motion")
-            row = box.row()
-            col = row.column(align=True)
-            col.prop(sc, "noise_direction", index=0, text="Flow X")
-            col.prop(sc, "noise_direction", index=1, text="Flow Y")
-            col.prop(sc, "noise_direction", index=2, text="Flow Z")
-            row.operator("lightingmod.draw_noise_flow", icon='BRUSH_DATA', text="Draw")
-            box.prop(sc, "noise_speed")
-            
-            # Fading
+            row = box.row(); col = row.column(align=True)
+            col.prop(sc, "adv_noise_direction", index=0, text="Flow X"); col.prop(sc, "adv_noise_direction", index=1, text="Flow Y"); col.prop(sc, "adv_noise_direction", index=2, text="Flow Z")
+            row.operator("advlighting.draw_noise_flow", icon='BRUSH_DATA', text="Draw")
+            box.prop(sc, "adv_noise_speed")
             box.label(text="Fading (Frames)")
             row = box.row(align=True)
-            row.prop(sc, "noise_fade_in", text="Fade In")
-            row.prop(sc, "noise_fade_out", text="Fade Out")
-            
-            # Colors
+            row.prop(sc, "adv_noise_fade_in", text="Fade In"); row.prop(sc, "adv_noise_fade_out", text="Fade Out")
             box.label(text="Colors")
-            ng = bpy.data.node_groups.get("LightingModNoiseRamp")
+            ng = bpy.data.node_groups.get("AdvLightingNoiseRamp")
             if ng and "Ramp" in ng.nodes: 
-                ramp_node = ng.nodes["Ramp"]
-                row = box.row(align=True)
-                row.prop(ramp_node.color_ramp, "color_mode", text="")
-                row.prop(ramp_node.color_ramp, "interpolation", text="")
-                box.template_color_ramp(ramp_node, "color_ramp")
+                box.template_color_ramp(ng.nodes["Ramp"], "color_ramp")
             else: 
-                box.operator("lightingmod.create_noise_nodegroup", text="Create Ramp")
+                box.operator("advlighting.create_noise_nodegroup", text="Create Ramp")
 
         elif tp in {'GRADIENT', 'OFFSET'}:
-            box.prop(sc, "gradient_mode", text="Mode")
-            
-            if sc.gradient_mode == 'CURVE':
-                box.prop(sc, "curve_object"); box.prop(sc, "curve_radius"); box.prop(sc, "curve_mode")
-            
+            box.prop(sc, "adv_gradient_mode", text="Mode")
+            if sc.adv_gradient_mode == 'CURVE':
+                box.prop(sc, "adv_curve_object"); box.prop(sc, "adv_curve_radius"); box.prop(sc, "adv_curve_mode")
             if tp == 'GRADIENT':
-                ng = bpy.data.node_groups.get("LightingModGradient")
+                ng = bpy.data.node_groups.get("AdvLightingGradient")
                 if ng and "Ramp" in ng.nodes: 
-                    ramp_node = ng.nodes["Ramp"]
-                    
-                    # --- NEW: Expose the Color Mode dropdowns ---
-                    row = box.row(align=True)
-                    row.prop(ramp_node.color_ramp, "color_mode", text="")
-                    row.prop(ramp_node.color_ramp, "interpolation", text="")
-                    
-                    box.template_color_ramp(ramp_node, "color_ramp")
+                    box.template_color_ramp(ng.nodes["Ramp"], "color_ramp")
                 else: 
-                    box.operator("lightingmod.create_gradient_nodegroup", text="Create Ramp")
+                    box.operator("advlighting.create_gradient_nodegroup", text="Create Ramp")
+                    
+                icon = 'TRIA_DOWN' if sc.adv_show_gradient_palettes else 'TRIA_RIGHT'
+                box.prop(sc, "adv_show_gradient_palettes", icon=icon, text="Gradient Library", emboss=False)
                 
-                box.operator("lightingmod.flip_color_ramp", icon='FILE_REFRESH', text="Flip Gradient Colors")
-                
-                if sc.gradient_mode != 'CURVE': box.operator("lightingmod.draw_gradient", icon='BRUSH_DATA', text="Draw Gradient")
+                if sc.adv_show_gradient_palettes:
+                    gbox = box.box()
+                    if not sc.adv_gradient_palettes:
+                        gbox.operator("advlighting.load_presets", text="Load Defaults", icon='FILE_TICK')
+                    else:
+                        gbox.template_list("ADVLIGHTING_UL_gradient_palettes", "", sc, "adv_gradient_palettes", sc, "adv_gradient_palettes_index", rows=4)
+                        row = gbox.row(align=True)
+                        row.operator("advlighting.save_gradient", icon='ADD', text="Save Active")
+                        row.operator("advlighting.remove_gradient", icon='REMOVE', text="")
+                        png = utils.ensure_gradient_preview_nodegroup()
+                        pcol = gbox.column(align=True)
+                        pcol.label(text="Preview:")
+                        pcol.template_color_ramp(png.nodes["Ramp"], "color_ramp")
+                        gbox.operator("advlighting.apply_gradient", icon='CHECKMARK', text="Apply to Active")
+
+                if sc.adv_gradient_mode != 'CURVE': box.operator("advlighting.draw_gradient", icon='BRUSH_DATA', text="Draw Gradient")
             else:
-                box.prop(sc, "effector_duration")
-                if sc.gradient_mode != 'CURVE': box.operator("lightingmod.draw_offset_line", icon='BRUSH_DATA', text="Draw Offset Line")
+                box.prop(sc, "adv_effector_duration")
+                if sc.adv_gradient_mode != 'CURVE': box.operator("advlighting.draw_offset_line", icon='BRUSH_DATA', text="Draw Offset Line")
 
         if tp=='DOMAIN':
-            box.prop(sc,"domain_object"); box.template_list("LIGHTINGMOD_UL_effector_colors","",sc,"effector_colors",sc,"effector_colors_index",rows=3)
-            row=box.row(align=True); row.operator("lightingmod.effector_color_add",icon='ADD',text=""); row.operator("lightingmod.effector_color_remove",icon='REMOVE',text="")
+            box.prop(sc,"adv_domain_object"); box.template_list("ADVLIGHTING_UL_effector_colors","",sc,"adv_effector_colors",sc,"adv_effector_colors_index",rows=3)
+            row=box.row(align=True); row.operator("advlighting.effector_color_add",icon='ADD',text=""); row.operator("advlighting.effector_color_remove",icon='REMOVE',text="")
 
-        elif tp=='MOVIE':
-            box.prop(sc,"image_texture"); box.prop(sc,"new_uv_map_name")
-            box.operator("lightingmod.generate_uv",icon='GROUP_UVS'); box.prop(sc,"movie_uv_map"); box.prop(sc,"movie_step")
+        elif tp == 'MOVIE':
+            box.label(text="Viewport Projection", icon='RESTRICT_VIEW_OFF')
+            box.label(text="Note: Bakes based on your current 3D camera angle.", icon='INFO')
+            box.prop(sc, "adv_movie_step")
 
-        box.operator("lightingmod.apply_effectors", text="Apply")
-
-
-class LIGHTINGMOD_PT_drone_groups(bpy.types.Panel):
-    bl_label="Formations & Groups"; bl_space_type='VIEW_3D'; bl_region_type='UI'; bl_category="Advanced Lighting"
-    
-    def draw(self, context):
-        sc = context.scene; layout = self.layout
+        box.operator("advlighting.apply_effectors", text="Apply")
         
-        # Formations
-        layout.label(text="Formations")
-        layout.template_list("LIGHTINGMOD_UL_formations", "", sc, "drone_formations", sc, "drone_formations_index", rows=2)
-        row = layout.row(align=True)
-        row.operator("lightingmod.formation_add", icon='ADD', text=""); row.operator("lightingmod.formation_remove", icon='REMOVE', text="")
+        # --- FORMATIONS ---
+        box = main_col.box()
+        box.label(text="Formations & Groups", icon='GROUP')
+        box.template_list("ADVLIGHTING_UL_formations", "", sc, "adv_drone_formations", sc, "adv_drone_formations_index", rows=2)
+        row = box.row(align=True)
+        row.operator("advlighting.formation_add", icon='ADD', text=""); row.operator("advlighting.formation_remove", icon='REMOVE', text="")
 
-        if sc.drone_formations:
-            f = sc.drone_formations[sc.drone_formations_index]
-            box = layout.box(); box.label(text=f"Groups in {f.name}")
-            box.template_list("LIGHTINGMOD_UL_groups", "", f, "groups", f, "groups_index", rows=2)
-            row = box.row(align=True)
-            row.operator("lightingmod.group_add", icon='ADD', text=""); row.operator("lightingmod.group_remove", icon='REMOVE', text="")
+        if sc.adv_drone_formations:
+            f = sc.adv_drone_formations[sc.adv_drone_formations_index]
+            sub = box.box(); sub.label(text=f"Groups in {f.name}")
+            sub.template_list("ADVLIGHTING_UL_groups", "", f, "groups", f, "groups_index", rows=2)
+            row = sub.row(align=True)
+            row.operator("advlighting.group_add", icon='ADD', text=""); row.operator("advlighting.group_remove", icon='REMOVE', text="")
 
             if f.groups:
                 g = f.groups[f.groups_index]
-                sub = box.box(); sub.label(text=f"Drones in {g.name}")
-                sub.template_list("LIGHTINGMOD_UL_group_drones", "", g, "drones", g, "drones_index", rows=4)
-                
-                row = sub.row(align=True)
-                row.operator("lightingmod.group_add_selected", icon='IMPORT', text="Add"); row.operator("lightingmod.group_remove_selected", icon='TRASH', text="Remove")
-                
-                row = sub.row(align=True)
-                op = row.operator("lightingmod.group_select", icon='RESTRICT_SELECT_OFF', text="Select"); op.additive = False
-                op = row.operator("lightingmod.group_select", icon='ADD', text="+"); op.additive = True
+                sub2 = sub.box(); sub2.label(text=f"Drones in {g.name}")
+                sub2.template_list("ADVLIGHTING_UL_group_drones", "", g, "drones", g, "drones_index", rows=4)
+                row = sub2.row(align=True)
+                row.operator("advlighting.group_add_selected", icon='IMPORT', text="Add"); row.operator("advlighting.group_remove_selected", icon='TRASH', text="Remove")
+                row = sub2.row(align=True)
+                op = row.operator("advlighting.group_select", icon='RESTRICT_SELECT_OFF', text="Select"); op.additive = False
+                op = row.operator("advlighting.group_select", icon='ADD', text="+"); op.additive = True
 
-class LIGHTINGMOD_PT_export(bpy.types.Panel):
-    bl_label="Export Colors"; bl_space_type='VIEW_3D'; bl_region_type='UI'; bl_category="Advanced Lighting"
-    def draw(self, context):
-        sc=context.scene; layout=self.layout
-        layout.prop(sc,"export_folder",text="CSV Folder")
-        layout.prop(sc, "export_filename", text="Filename")
-        
-        col = layout.column(align=True)
-        col.operator("lightingmod.export_csv_colors", text="Overwrite CSV Colors", icon='FILE_TEXT')
-        col.operator("lightingmod.export_color_transfer", text="Export Colour Transfer", icon='EXPORT')
+        # JSON Import/Export (For Palettes only now)
+        box = main_col.box()
+        box.label(text="JSON Palettes", icon='OUTLINER_DATA_GREASEPENCIL')
+        row = box.row(align=True)
+        row.operator("advlighting.import_palettes", text="Import", icon='IMPORT')
+        row.operator("advlighting.export_palettes", text="Export", icon='EXPORT')
 
 classes = (
-    LIGHTINGMOD_UL_layers, LIGHTINGMOD_UL_effector_colors,
-    LIGHTINGMOD_UL_formations, LIGHTINGMOD_UL_groups, LIGHTINGMOD_UL_group_drones, LIGHTINGMOD_UL_temporal_stages,
-    LIGHTINGMOD_UL_spark_profiles,
-    LIGHTINGMOD_PT_panel, LIGHTINGMOD_PT_drone_groups, LIGHTINGMOD_PT_export,
+    ADVLIGHTING_UL_layers, ADVLIGHTING_UL_color_palettes, ADVLIGHTING_UL_gradient_palettes, ADVLIGHTING_UL_effector_colors, 
+    ADVLIGHTING_UL_formations, ADVLIGHTING_UL_groups, ADVLIGHTING_UL_group_drones, 
+    ADVLIGHTING_UL_temporal_stages, ADVLIGHTING_UL_spark_profiles, ADVLIGHTING_PT_panel,
 )
 
 def register():

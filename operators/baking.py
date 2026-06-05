@@ -6,6 +6,19 @@ import re
 from .. import utils
 from bpy.props import FloatProperty
 
+# --- CLOCK OPERATORS ---
+class ADVLIGHTING_OT_set_bake_start(bpy.types.Operator):
+    bl_idname="advlighting.set_bake_start"; bl_label=""
+    def execute(self, context):
+        context.scene.adv_bake_start = context.scene.frame_current
+        return{'FINISHED'}
+
+class ADVLIGHTING_OT_set_bake_end(bpy.types.Operator):
+    bl_idname="advlighting.set_bake_end"; bl_label=""
+    def execute(self, context):
+        context.scene.adv_bake_end = context.scene.frame_current
+        return{'FINISHED'}
+
 # --- COLOR BAKING HELPERS ---
 def find_critical_indices(values):
     n = len(values)
@@ -40,16 +53,17 @@ def rdp_simplify(frames, values, epsilon):
         return np.array([start_f, end_f]), np.vstack((start_v, end_v))
 
 # --- COLOR BAKING OPERATOR ---
-class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
-    bl_idname = "lightingmod.bake_colors"
+class ADVLIGHTING_OT_bake_colors(bpy.types.Operator):
+    bl_idname = "advlighting.bake_colors"
     bl_label  = "Bake Colors"
+    bl_description = "Calculates all layers and bakes the final mix directly to md_layer_1"
     bl_options = {'REGISTER', 'UNDO'}
     
     tolerance: FloatProperty(name="Tolerance", default=0.02, min=0.0, max=1.0)
 
     def execute(self, context):
         sc = context.scene
-        start, end = sc.frame_start, sc.frame_end
+        start, end = sc.adv_bake_start, sc.adv_bake_end
         frames = list(range(start, end + 1))
         utils.baked_colors.clear()
         
@@ -64,7 +78,7 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
                         fc_map.setdefault(int(m.group(1)), {})[fc.array_index] = fc
             
             initial_vals = {}
-            for i, layer in enumerate(sc.ly_layers):
+            for i, layer in enumerate(sc.adv_layers):
                 val = o.get(f"Layer_{i+1}", [0.0, 0.0, 0.0])
                 try:
                     lst = list(val)
@@ -76,11 +90,11 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
         opacity_fcurves = {}
         if sc.animation_data and sc.animation_data.action:
             for fc in sc.animation_data.action.fcurves:
-                m = re.match(r'ly_layers\[(\d+)\]\.opacity', fc.data_path)
+                m = re.match(r'adv_layers\[(\d+)\]\.opacity', fc.data_path)
                 if m: opacity_fcurves[int(m.group(1))] = fc
 
         layer_configs = []
-        for i, layer in enumerate(sc.ly_layers):
+        for i, layer in enumerate(sc.adv_layers):
             ops = [opacity_fcurves[i].evaluate(f) for f in frames] if i in opacity_fcurves else [layer.opacity] * len(frames)
             layer_configs.append({'idx': i, 'mute': layer.mute, 'solo': layer.solo, 'blend': layer.blend_mode, 'opacities': ops})
 
@@ -91,6 +105,10 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
             fc_map, initials = data_pack['fc_map'], data_pack['initials']
             
             for f_idx, f in enumerate(frames):
+                if not layer_configs:
+                    final_colors.append((0,0,0))
+                    continue
+                
                 l0 = layer_configs[0]
                 enabled0 = (not l0['mute']) and (l0['solo'] or not any_solo)
                 base_col = [fc_map[1][ch].evaluate(f) if (1 in fc_map and ch in fc_map[1]) else initials[1][ch] for ch in range(3)] if enabled0 else [0.0]*3
@@ -110,7 +128,7 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
         wm = context.window_manager
         wm.progress_begin(0, len(obj_fcurves))
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(obj_fcurves), multiprocessing.cpu_count())) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(max(1, len(obj_fcurves)), multiprocessing.cpu_count())) as executor:
             futures = [executor.submit(bake_worker, name, data) for name, data in obj_fcurves.items()]
             for i, future in enumerate(concurrent.futures.as_completed(futures), start=1):
                 name, data = future.result()
@@ -125,19 +143,23 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
             o = bpy.data.objects.get(obj_name)
             if not o: continue
             
+            # Ensure target property exists
+            if "md_layer_1" not in o: o["md_layer_1"] = [0.0, 0.0, 0.0, 1.0]
+            
             if not o.animation_data: o.animation_data_create()
             if not o.animation_data.action: o.animation_data.action = bpy.data.actions.new(name=f"{obj_name}_color")
             action = o.animation_data.action
             
-            for fc in [fc for fc in action.fcurves if fc.data_path == "color"]: action.fcurves.remove(fc)
+            # Remove old fcurves from md_layer_1
+            for fc in [fc for fc in action.fcurves if fc.data_path == '["md_layer_1"]']: action.fcurves.remove(fc)
             col_arr = np.array(color_data, dtype=np.float32) / 255.0
                 
             if self.tolerance > 0.0:
                 critical_idx = find_critical_indices(col_arr)
                 final_f_list, final_v_list = [], []
                 for k in range(len(critical_idx) - 1):
-                    start, end = critical_idx[k], critical_idx[k+1]
-                    sf, sv = rdp_simplify(frames_arr[start:end+1], col_arr[start:end+1], self.tolerance)
+                    start_i, end_i = critical_idx[k], critical_idx[k+1]
+                    sf, sv = rdp_simplify(frames_arr[start_i:end_i+1], col_arr[start_i:end_i+1], self.tolerance)
                     if k > 0:
                         final_f_list.extend(sf[1:])
                         final_v_list.append(sv[1:])
@@ -150,7 +172,7 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
                 final_frames, final_vals = frames_arr, col_arr
             
             for channel in range(3):
-                fc = action.fcurves.new(data_path="color", index=channel)
+                fc = action.fcurves.new(data_path='["md_layer_1"]', index=channel)
                 final_data = np.column_stack((final_frames, final_vals[:, channel]))
                 fc.keyframe_points.add(len(final_data))
                 fc.keyframe_points.foreach_set('co', final_data.flatten())
@@ -158,13 +180,14 @@ class LIGHTINGMOD_OT_bake_colors(bpy.types.Operator):
             if i % 50 == 0: wm.progress_update(i)
 
         wm.progress_end()
+        self.report({'INFO'}, "Master Mix baked to md_layer_1")
         return {'FINISHED'}
 
-# --- POSITION BAKING OPERATOR (New Feature 2) ---
-class LIGHTINGMOD_OT_bake_positions(bpy.types.Operator):
-    bl_idname = "lightingmod.bake_positions"
+# --- SMART BOUNDS POSITION BAKING ---
+class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
+    bl_idname = "advlighting.bake_positions"
     bl_label  = "Bake Positions"
-    bl_description = "Calculates and bakes absolute flight paths into the 'Absolute_Position' property"
+    bl_description = "Calculates absolute flight paths into 'Absolute_Position'"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -172,26 +195,33 @@ class LIGHTINGMOD_OT_bake_positions(bpy.types.Operator):
         drones = [o for o in bpy.data.objects if o.get("md_sphere") and o.type=='MESH']
         if not drones: return {'CANCELLED'}
 
-        # "A" ensures it defaults to the very top of the Custom Properties UI
         prop_name = "Absolute_Position" 
         data_path = f'["{prop_name}"]'
 
-        # 1. Ensure property exists and is formatted as XYZ
         for d in drones:
             d[prop_name] = [0.0, 0.0, 0.0]
             ui = d.id_properties_ui(prop_name)
             ui.update(subtype='TRANSLATION')
 
-        # 2. Optimized Sampling Loop
+        # Generate smart frame bounds from constraint keys
+        frames_to_bake = set(range(sc.adv_bake_start, sc.adv_bake_end + 1))
+        for d in drones:
+            if d.animation_data and d.animation_data.action:
+                for fc in d.animation_data.action.fcurves:
+                    if 'constraints' in fc.data_path:
+                        for kp in fc.keyframe_points:
+                            frames_to_bake.add(int(kp.co[0]))
+                            
+        sorted_frames = sorted(list(frames_to_bake))
+
         wm = context.window_manager
-        wm.progress_begin(sc.frame_start, sc.frame_end)
-        
+        wm.progress_begin(0, len(sorted_frames))
         sampled_data = {d.name: [] for d in drones}
 
         def get_influences(drone):
             return sorted([c for c in drone.constraints if c.type == 'COPY_LOCATION' and c.name.lower().startswith('copy done')], key=lambda c: c.name)
 
-        for f in range(sc.frame_start, sc.frame_end + 1):
+        for p_idx, f in enumerate(sorted_frames):
             sc.frame_set(f)
             for d in drones:
                 cons = get_influences(d)
@@ -205,7 +235,6 @@ class LIGHTINGMOD_OT_bake_positions(bpy.types.Operator):
                 curr_idx = max(active_idxs)
                 c_curr = cons[curr_idx]
                 inf_curr = getattr(c_curr, "influence", 0.0)
-                
                 tgt_curr = getattr(c_curr, "target", None)
                 empty_curr = tgt_curr if tgt_curr and getattr(tgt_curr, "type", "") == 'EMPTY' else None
 
@@ -226,24 +255,18 @@ class LIGHTINGMOD_OT_bake_positions(bpy.types.Operator):
                     y = (1.0 - a) * p0.y + a * p1.y
                     z = (1.0 - a) * p0.z + a * p1.z
                     sampled_data[d.name].append((f, x, y, z))
-                    
-            if f % 10 == 0: wm.progress_update(f)
+            if p_idx % 10 == 0: wm.progress_update(p_idx)
 
-        # 3. Bulk Write to F-Curves
         for d_name, data in sampled_data.items():
             d = bpy.data.objects.get(d_name)
             if not d.animation_data: d.animation_data_create()
             if not d.animation_data.action: d.animation_data.action = bpy.data.actions.new(name=f"{d.name}Action")
             act = d.animation_data.action
-            
             data_np = np.array(data, dtype=np.float32)
             frames_arr = data_np[:, 0]
-            
             for i in range(3):
                 fc = act.fcurves.find(data_path=data_path, index=i)
                 if not fc: fc = act.fcurves.new(data_path=data_path, index=i)
-                
-                # Clear and inject entire flight path array instantly
                 fc.keyframe_points.clear()
                 pts = np.column_stack((frames_arr, data_np[:, i+1]))
                 fc.keyframe_points.add(len(pts))
@@ -251,10 +274,14 @@ class LIGHTINGMOD_OT_bake_positions(bpy.types.Operator):
                 fc.update()
 
         wm.progress_end()
-        self.report({'INFO'}, "Absolute Positions Baked Successfully")
         return {'FINISHED'}
 
-classes = (LIGHTINGMOD_OT_bake_colors, LIGHTINGMOD_OT_bake_positions)
+classes = (
+    ADVLIGHTING_OT_set_bake_start, 
+    ADVLIGHTING_OT_set_bake_end,
+    ADVLIGHTING_OT_bake_colors, 
+    ADVLIGHTING_OT_bake_positions
+)
 def register():
     for cls in classes: bpy.utils.register_class(cls)
 def unregister():

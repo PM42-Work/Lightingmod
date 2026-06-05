@@ -7,57 +7,57 @@ from .. import utils
 METADATA_SPHERE = "md_sphere"
 METADATA_EMPTY = "md_empty"
 
-class LIGHTINGMOD_OT_swap_batch_colors(bpy.types.Operator):
-    bl_idname = "lightingmod.swap_batch_colors"
+class ADVLIGHTING_OT_swap_batch_colors(bpy.types.Operator):
+    bl_idname = "advlighting.swap_batch_colors"
     bl_label  = ""
     def execute(self, context):
         sc = context.scene
-        tmp = sc.batch_primary_color[:]
-        sc.batch_primary_color = sc.batch_secondary_color
-        sc.batch_secondary_color = tmp
+        tmp = sc.adv_batch_primary_color[:]
+        sc.adv_batch_primary_color = sc.adv_batch_secondary_color
+        sc.adv_batch_secondary_color = tmp
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_batch_color_keyframe(bpy.types.Operator):
-    bl_idname = "lightingmod.batch_color_keyframe"
+class ADVLIGHTING_OT_batch_color_keyframe(bpy.types.Operator):
+    bl_idname = "advlighting.batch_color_keyframe"
     bl_label  = "Color & Keyframe"
     def execute(self, context):
-        sc = context.scene; idx = int(sc.batch_target_layer); prop = f"Layer_{idx+1}"
+        sc = context.scene; idx = int(sc.adv_batch_target_layer); prop = f"Layer_{idx+1}"
         frame = sc.frame_current; prev = {}
         for o in context.selected_objects:
             if o.get("md_sphere") and o.type == 'MESH' and prop in o.keys():
                 prev[o.name] = o[prop][:]
-        rgb = list(sc.batch_primary_color)[:3]
+        rgb = list(sc.adv_batch_primary_color)[:3]
         for nm, old in prev.items():
             o = bpy.data.objects[nm]; o[prop] = rgb; o.keyframe_insert(data_path=f'["{prop}"]', frame=frame)
         utils.last_batch_history = {'action': 'color_keyframe', 'prop': prop, 'values': prev, 'frame': frame}
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_batch_color(bpy.types.Operator):
-    bl_idname = "lightingmod.batch_color"
+class ADVLIGHTING_OT_batch_color(bpy.types.Operator):
+    bl_idname = "advlighting.batch_color"
     bl_label  = "Color Only"
     def execute(self, context):
-        sc = context.scene; idx = int(sc.batch_target_layer); prop = f"Layer_{idx+1}"; prev = {}
+        sc = context.scene; idx = int(sc.adv_batch_target_layer); prop = f"Layer_{idx+1}"; prev = {}
         for o in context.selected_objects:
             if o.get("md_sphere") and o.type == 'MESH' and prop in o.keys():
                 prev[o.name] = o[prop][:]
-        rgb = list(sc.batch_primary_color)[:3]
+        rgb = list(sc.adv_batch_primary_color)[:3]
         for nm in prev: bpy.data.objects[nm][prop] = rgb
         utils.last_batch_history = {'action': 'color', 'prop': prop, 'values': prev}
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_keyframe_current(bpy.types.Operator):
-    bl_idname = "lightingmod.keyframe_current"
+class ADVLIGHTING_OT_keyframe_current(bpy.types.Operator):
+    bl_idname = "advlighting.keyframe_current"
     bl_label  = "Keyframe Current"
     def execute(self, context):
-        sc = context.scene; idx = int(sc.batch_target_layer); prop = f"Layer_{idx+1}"; frame = sc.frame_current
+        sc = context.scene; idx = int(sc.adv_batch_target_layer); prop = f"Layer_{idx+1}"; frame = sc.frame_current
         utils.last_batch_history = {'action': 'keyframe', 'prop': prop, 'frame': frame}
         for o in context.selected_objects:
             if o.get("md_sphere") and o.type == 'MESH' and prop in o.keys():
                 o.keyframe_insert(data_path=f'["{prop}"]', frame=frame)
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_undo_last_edit(bpy.types.Operator):
-    bl_idname = "lightingmod.undo_last_edit"
+class ADVLIGHTING_OT_undo_last_edit(bpy.types.Operator):
+    bl_idname = "advlighting.undo_last_edit"
     bl_label  = "Undo Last Edit"
     def execute(self, context):
         hist = utils.last_batch_history
@@ -75,8 +75,8 @@ class LIGHTINGMOD_OT_undo_last_edit(bpy.types.Operator):
         utils.last_batch_history = {}
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_export_csv_colors(bpy.types.Operator):
-    bl_idname = "lightingmod.export_csv_colors"
+class ADVLIGHTING_OT_export_csv_colors(bpy.types.Operator):
+    bl_idname = "advlighting.export_csv_colors"
     bl_label  = "Overwrite CSV Colors"
     def execute(self, context):
         sc = context.scene; folder = bpy.path.abspath(sc.export_folder); start = sc.frame_start
@@ -104,8 +104,8 @@ class LIGHTINGMOD_OT_export_csv_colors(bpy.types.Operator):
         self.report({'INFO'}, "CSV colors updated")
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_export_color_transfer(bpy.types.Operator):
-    bl_idname = "lightingmod.export_color_transfer"
+class ADVLIGHTING_OT_export_color_transfer(bpy.types.Operator):
+    bl_idname = "advlighting.export_color_transfer"
     bl_label  = "Export Colour Transfer"
     bl_description = "Export Object Color to JSON (1:1 ID Mapping)"
 
@@ -206,13 +206,13 @@ class LIGHTINGMOD_OT_export_color_transfer(bpy.types.Operator):
         return {'FINISHED'}
 
 classes = (
-    LIGHTINGMOD_OT_swap_batch_colors,
-    LIGHTINGMOD_OT_batch_color_keyframe,
-    LIGHTINGMOD_OT_batch_color,
-    LIGHTINGMOD_OT_keyframe_current,
-    LIGHTINGMOD_OT_undo_last_edit,
-    LIGHTINGMOD_OT_export_csv_colors,
-    LIGHTINGMOD_OT_export_color_transfer,
+    ADVLIGHTING_OT_swap_batch_colors,
+    ADVLIGHTING_OT_batch_color_keyframe,
+    ADVLIGHTING_OT_batch_color,
+    ADVLIGHTING_OT_keyframe_current,
+    ADVLIGHTING_OT_undo_last_edit,
+    ADVLIGHTING_OT_export_csv_colors,
+    ADVLIGHTING_OT_export_color_transfer,
 )
 def register():
     for cls in classes: bpy.utils.register_class(cls)

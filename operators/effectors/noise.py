@@ -1,10 +1,11 @@
 import bpy
 import mathutils
 import concurrent.futures
+from ... import utils
 
-# --- THE PURE MATH WORKER (Runs safely on multiple threads) ---
+# --- THE PURE MATH WORKER ---
 def process_drone_math(task_data):
-    (drone_idx, num_frames, start, end, scale, dir_v, speed, contrast, 
+    (drone_idx, num_frames, start, end, sx, sy, sz, dir_v, speed, contrast, 
      noise_type, fade_in, fade_out, positions, base_start, base_end, color_lut) = task_data
 
     r_data = [0.0] * (num_frames * 2)
@@ -14,9 +15,12 @@ def process_drone_math(task_data):
     for frame_idx, f in enumerate(range(start, end + 1)):
         px, py, pz = positions[frame_idx]
         
-        # Flow math
+        # --- NEW: Independent XYZ Scaling ---
         time_offset = dir_v * speed * (f / 24.0)
-        sample_coord = (mathutils.Vector((px, py, pz)) + time_offset) * scale 
+        cx = (px + time_offset.x) * sx
+        cy = (py + time_offset.y) * sy
+        cz = (pz + time_offset.z) * sz
+        sample_coord = mathutils.Vector((cx, cy, cz))
         
         # Noise generation
         if noise_type == 'PERLIN':
@@ -56,21 +60,20 @@ def process_drone_math(task_data):
     return drone_idx, r_data, g_data, b_data
 
 
-class LIGHTINGMOD_OT_noise_effector(bpy.types.Operator):
-    bl_idname = "lightingmod.noise_effector"
+class ADVLIGHTING_OT_noise_effector(bpy.types.Operator):
+    bl_idname = "advlighting.noise_effector"
     bl_label = "Apply Noise"
     
     def execute(self, context):
         sc = context.scene
-        start, end = sc.effector_start, sc.effector_end
-        prop_name = f"Layer_{int(sc.effector_target_layer)+1}"
+        start, end = sc.adv_effector_start, sc.adv_effector_end
+        prop_name = f"Layer_{int(sc.adv_effector_target_layer)+1}"
         num_frames = (end - start) + 1
         
-        # 1. Gather Drones
         drones = []
-        if sc.effector_selection_mode == 'GROUP' and sc.drone_formations:
-             if sc.drone_formations[sc.drone_formations_index].groups:
-                 g = sc.drone_formations[sc.drone_formations_index].groups[sc.drone_formations[sc.drone_formations_index].groups_index]
+        if sc.adv_effector_selection_mode == 'GROUP' and sc.adv_drone_formations:
+             if sc.adv_drone_formations[sc.adv_drone_formations_index].groups:
+                 g = sc.adv_drone_formations[sc.adv_drone_formations_index].groups[sc.adv_drone_formations[sc.adv_drone_formations_index].groups_index]
                  drones = [bpy.data.objects.get(d.object_name) for d in g.drones if bpy.data.objects.get(d.object_name)]
         else:
              drones = [o for o in context.selected_objects if o.get("md_sphere") and o.type=='MESH']
@@ -80,24 +83,26 @@ class LIGHTINGMOD_OT_noise_effector(bpy.types.Operator):
             self.report({'ERROR'}, "Positions not baked!")
             return {'CANCELLED'}
 
-        # LUT Setup
-        ng = bpy.data.node_groups.get("LightingModNoiseRamp")
+        ng = bpy.data.node_groups.get("AdvLightingNoiseRamp")
         if not ng or "Ramp" not in ng.nodes: return {'CANCELLED'}
         color_lut = [list(ng.nodes["Ramp"].color_ramp.evaluate(i / 999.0))[:3] for i in range(1000)]
 
-        # Cache UI Params
-        scale = sc.noise_scale; dir_v = mathutils.Vector(sc.noise_direction)
-        speed = sc.noise_speed; contrast = sc.noise_contrast
-        noise_type = sc.noise_type; fade_in = sc.noise_fade_in; fade_out = sc.noise_fade_out
+        # --- Resolve Vector Scaling ---
+        if sc.adv_noise_scale_linked:
+            sx = sy = sz = sc.adv_noise_scale_master
+        else:
+            sx, sy, sz = sc.adv_noise_scale_xyz
+
+        dir_v = mathutils.Vector(sc.adv_noise_direction)
+        speed = sc.adv_noise_speed; contrast = sc.adv_noise_contrast
+        noise_type = sc.adv_noise_type; fade_in = sc.adv_noise_fade_in; fade_out = sc.adv_noise_fade_out
 
         wm = context.window_manager
         wm.progress_begin(0, len(valid_drones))
 
-        # --- PHASE 1: DATA EXTRACTION (Main Thread) ---
         tasks = []
         for drone_idx, o in enumerate(valid_drones):
             wm.progress_update(drone_idx) 
-            
             base_start = list(o.get(prop_name, [0,0,0,1]))[:3]
             base_end = list(o.get(prop_name, [0,0,0,1]))[:3]
             
@@ -115,17 +120,15 @@ class LIGHTINGMOD_OT_noise_effector(bpy.types.Operator):
                 positions.append((cur_px, cur_py, cur_pz))
                 
             tasks.append((
-                drone_idx, num_frames, start, end, scale, dir_v, speed, contrast, 
+                drone_idx, num_frames, start, end, sx, sy, sz, dir_v, speed, contrast, 
                 noise_type, fade_in, fade_out, positions, base_start, base_end, color_lut
             ))
 
-        # --- PHASE 2: PARALLEL COMPUTATION (Worker Threads) ---
         results = []
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for result in executor.map(process_drone_math, tasks):
                 results.append(result)
 
-        # --- PHASE 3: BULLETPROOF C-LEVEL INJECTION (Main Thread) ---
         wm.progress_begin(0, len(valid_drones)) 
         for drone_idx, r_data, g_data, b_data in results:
             wm.progress_update(drone_idx)
@@ -142,22 +145,16 @@ class LIGHTINGMOD_OT_noise_effector(bpy.types.Operator):
                 fcurves.append(fc)
 
             for i, fc in enumerate(fcurves):
-                # 1. Extract existing curve data into a fast Dictionary
                 curve_data = {p.co[0]: p.co[1] for p in fc.keyframe_points}
-                
-                # 2. Merge our newly calculated noise frames into the dictionary
                 new_data = r_data if i == 0 else (g_data if i == 1 else b_data)
                 for j in range(num_frames):
                     curve_data[new_data[j * 2]] = new_data[j * 2 + 1]
                     
-                # 3. Create a perfectly sized flat array for foreach_set
                 sorted_frames = sorted(curve_data.keys())
                 flat_data = [0.0] * (len(sorted_frames) * 2)
                 for j, f in enumerate(sorted_frames):
-                    flat_data[j * 2] = f
-                    flat_data[j * 2 + 1] = curve_data[f]
+                    flat_data[j * 2] = f; flat_data[j * 2 + 1] = curve_data[f]
                     
-                # 4. Wipe the old curve and cleanly inject the flawless C-Array
                 fc.keyframe_points.clear()
                 fc.keyframe_points.add(len(sorted_frames))
                 fc.keyframe_points.foreach_set('co', flat_data)

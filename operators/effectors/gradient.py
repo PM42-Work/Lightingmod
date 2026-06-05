@@ -5,29 +5,26 @@ from bpy_extras import view3d_utils
 from ... import utils
 from .evaluator import EffectorEvaluator
 
-class LIGHTINGMOD_OT_create_gradient_nodegroup(bpy.types.Operator):
-    bl_idname = "lightingmod.create_gradient_nodegroup"
+class ADVLIGHTING_OT_create_gradient_nodegroup(bpy.types.Operator):
+    bl_idname = "advlighting.create_gradient_nodegroup"
     bl_label = "Create Gradient Ramp NodeGroup"
     def execute(self, context):
         utils.ensure_gradient_nodegroup()
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_flip_color_ramp(bpy.types.Operator):
-    bl_idname = "lightingmod.flip_color_ramp"
+class ADVLIGHTING_OT_flip_color_ramp(bpy.types.Operator):
+    bl_idname = "advlighting.flip_color_ramp"
     bl_label  = "Flip Gradient Colors"
     bl_description = "Inverts the color ramp (flips 0.0 to 1.0)"
 
     def execute(self, context):
-        ng = context.scene.gradient_ng
+        ng = context.scene.adv_gradient_ng
         if not ng or "Ramp" not in ng.nodes:
             self.report({'WARNING'}, "Gradient Node Group not found")
             return {'CANCELLED'}
         
         ramp = ng.nodes["Ramp"].color_ramp
-        
-        # Capture a snapshot of elements because changing positions re-sorts the array live
         snapshot = [e for e in ramp.elements]
-        
         for e in snapshot:
             e.position = 1.0 - e.position
             
@@ -35,8 +32,8 @@ class LIGHTINGMOD_OT_flip_color_ramp(bpy.types.Operator):
         self.report({'INFO'}, "Gradient Ramp Flipped")
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_draw_gradient(bpy.types.Operator):
-    bl_idname = "lightingmod.draw_gradient"
+class ADVLIGHTING_OT_draw_gradient(bpy.types.Operator):
+    bl_idname = "advlighting.draw_gradient"
     bl_label  = "Draw Gradient"
     bl_description = "Click two points to define your gradient domain"
 
@@ -47,12 +44,10 @@ class LIGHTINGMOD_OT_draw_gradient(bpy.types.Operator):
     def invoke(self, context, event):
         sc = context.scene
         
-        # --- FIX 2: Instant Apply for Curve Mode ---
-        if sc.gradient_mode == 'CURVE':
-            if not sc.curve_object:
+        if sc.adv_gradient_mode == 'CURVE':
+            if not sc.adv_curve_object:
                 self.report({'ERROR'}, "Please assign a Curve Object in the panel first.")
                 return {'CANCELLED'}
-            # We don't need point data for curves, just pass zeros
             self.first = (0.0, 0.0, 0.0)
             self.second = (0.0, 0.0, 0.0)
             self.apply_gradient(context)
@@ -101,27 +96,24 @@ class LIGHTINGMOD_OT_draw_gradient(bpy.types.Operator):
 
     def apply_gradient(self, context):
         sc = context.scene
-        ng = bpy.data.node_groups.get("LightingModGradient")
+        ng = bpy.data.node_groups.get("AdvLightingGradient")
         if not ng or "Ramp" not in ng.nodes:
             utils.ensure_gradient_nodegroup()
-            ng = bpy.data.node_groups.get("LightingModGradient")
+            ng = bpy.data.node_groups.get("AdvLightingGradient")
         
         ramp = ng.nodes["Ramp"].color_ramp
-        layer_idx = int(sc.effector_target_layer) + 1
+        layer_idx = int(sc.adv_effector_target_layer) + 1
         prop = f"Layer_{layer_idx}"
         
-        # Init Evaluator (Handles Curve, Split, etc.)
-        evaluator = EffectorEvaluator(context, sc.gradient_mode, self.first, self.second, 
-                                      sc.curve_object, sc.curve_radius, sc.curve_mode)
+        evaluator = EffectorEvaluator(context, sc.adv_gradient_mode, self.first, self.second, 
+                                      sc.adv_curve_object, sc.adv_curve_radius, sc.adv_curve_mode)
 
-        # Collect Objects (Selection OR Group)
         objs = []
-        if sc.effector_selection_mode == 'GROUP' and sc.drone_formations:
-             if sc.drone_formations[sc.drone_formations_index].groups:
-                 g = sc.drone_formations[sc.drone_formations_index].groups[sc.drone_formations[sc.drone_formations_index].groups_index]
+        if sc.adv_effector_selection_mode == 'GROUP' and sc.adv_drone_formations:
+             if sc.adv_drone_formations[sc.adv_drone_formations_index].groups:
+                 g = sc.adv_drone_formations[sc.adv_drone_formations_index].groups[sc.adv_drone_formations[sc.adv_drone_formations_index].groups_index]
                  objs = [bpy.data.objects.get(d.object_name) for d in g.drones if bpy.data.objects.get(d.object_name)]
         else:
-             # --- FIX 1: Respect Viewport Selection ---
              objs = [o for o in context.selected_objects if o.get("md_sphere") and o.type=='MESH']
 
         for obj in objs:
@@ -131,7 +123,6 @@ class LIGHTINGMOD_OT_draw_gradient(bpy.types.Operator):
             if not valid: continue
             
             r, g, b, a = ramp.evaluate(t)
-            
             base = obj[prop]
             fac  = a
             newcol = [ base[i]*(1-fac) + c*fac for i,c in enumerate((r,g,b)) ]

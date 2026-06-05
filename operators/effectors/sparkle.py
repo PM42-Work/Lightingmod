@@ -1,8 +1,8 @@
 import bpy
 from .generator import apply_sparkle_effect
 
-class LIGHTINGMOD_OT_sparkle_effector(bpy.types.Operator):
-    bl_idname = "lightingmod.sparkle"
+class ADVLIGHTING_OT_sparkle_effector(bpy.types.Operator):
+    bl_idname = "advlighting.sparkle"
     bl_label  = "Sparkle"
     
     def execute(self, context):

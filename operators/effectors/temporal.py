@@ -1,8 +1,8 @@
 import bpy
 from .generator import apply_sparkle_effect
 
-class LIGHTINGMOD_OT_temporal_sparkle(bpy.types.Operator):
-    bl_idname = "lightingmod.temporal_sparkle"
+class ADVLIGHTING_OT_temporal_sparkle(bpy.types.Operator):
+    bl_idname = "advlighting.temporal_sparkle"
     bl_label = "Temporal Sparkle"
     
     def execute(self, context):
@@ -12,8 +12,8 @@ class LIGHTINGMOD_OT_temporal_sparkle(bpy.types.Operator):
             return {'CANCELLED'}
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_stage_add(bpy.types.Operator):
-    bl_idname = "lightingmod.stage_add"
+class ADVLIGHTING_OT_stage_add(bpy.types.Operator):
+    bl_idname = "advlighting.stage_add"
     bl_label = "Add Stage"
     def execute(self, context):
         sc = context.scene
@@ -21,8 +21,8 @@ class LIGHTINGMOD_OT_stage_add(bpy.types.Operator):
         st.name = f"Stage {len(sc.temporal_stages)}"
         return {'FINISHED'}
 
-class LIGHTINGMOD_OT_stage_remove(bpy.types.Operator):
-    bl_idname = "lightingmod.stage_remove"
+class ADVLIGHTING_OT_stage_remove(bpy.types.Operator):
+    bl_idname = "advlighting.stage_remove"
     bl_label = "Remove Stage"
     def execute(self, context):
         sc = context.scene

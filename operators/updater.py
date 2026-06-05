@@ -7,8 +7,8 @@ import shutil
 import tempfile
 import sys
 
-class LIGHTINGMOD_OT_update_addon(bpy.types.Operator):
-    bl_idname = "lightingmod.update_addon"
+class ADVLIGHTING_OT_update_addon(bpy.types.Operator):
+    bl_idname = "advlighting.update_addon"
     bl_label  = "Check for Updates"
     bl_description = "Checks GitHub for updates and installs if a newer version is available"
 
@@ -116,7 +116,7 @@ class LIGHTINGMOD_OT_update_addon(bpy.types.Operator):
 
         return {'FINISHED'}
 
-classes = (LIGHTINGMOD_OT_update_addon,)
+classes = (ADVLIGHTING_OT_update_addon,)
 
 def register():
     for cls in classes: bpy.utils.register_class(cls)
