@@ -20,8 +20,8 @@ classes = (
     management.ADVLIGHTING_OT_effector_color_add,
     management.ADVLIGHTING_OT_effector_color_remove,
     management.ADVLIGHTING_OT_effector_monochrome,
-    management.ADVLIGHTING_OT_set_start_frame,
-    management.ADVLIGHTING_OT_set_end_frame,
+    management.ADVLIGHTING_OT_set_effector_start,
+    management.ADVLIGHTING_OT_set_effector_end, 
     management.ADVLIGHTING_OT_spark_profile_add,
     management.ADVLIGHTING_OT_spark_profile_remove,
     
