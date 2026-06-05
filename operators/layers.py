@@ -54,6 +54,9 @@ class ADVLIGHTING_OT_layer_add(bpy.types.Operator):
         em = nodes.get("Emission") or nodes.new("ShaderNodeEmission")
         em.location = (400,0)
         
+        # --- EMISSION STRENGTH SET TO 10 ---
+        em.inputs['Strength'].default_value = 10.0
+        
         if not em.outputs[0].links: links.new(em.outputs[0], out.inputs[0])
             
         if idx == 0:
@@ -214,7 +217,6 @@ class ADVLIGHTING_OT_layer_move(bpy.types.Operator):
 
         target_idx = idx - 1 if self.direction == 'UP' else idx + 1
         
-        # --- BASE LAYER UNLOCKED ---
         if target_idx < 0 or target_idx >= len(sc.adv_layers):
             return {'CANCELLED'}
 
@@ -292,6 +294,10 @@ class ADVLIGHTING_OT_redraw_nodes(bpy.types.Operator):
         
         out = nodes.new("ShaderNodeOutputMaterial"); out.location = (600, 0)
         em = nodes.new("ShaderNodeEmission"); em.location = (400, 0)
+        
+        # --- EMISSION STRENGTH SET TO 10 ---
+        em.inputs['Strength'].default_value = 10.0
+        
         links.new(em.outputs[0], out.inputs[0])
         
         if not sc.adv_layers: return {'FINISHED'}
@@ -344,6 +350,37 @@ class ADVLIGHTING_OT_redraw_nodes(bpy.types.Operator):
         utils.refresh_layer_enable(sc)
         return {'FINISHED'}
 
+# --- THE NEW VIEW BAKED TOGGLE ---
+class ADVLIGHTING_OT_view_baked(bpy.types.Operator):
+    bl_idname = "advlighting.view_baked"
+    bl_label  = "View Baked"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        mat = bpy.data.materials.get("drone colour")
+        if not mat: 
+            self.report({'WARNING'}, "Material 'drone colour' not found.")
+            return {'CANCELLED'}
+            
+        mat.use_nodes = True
+        nodes = mat.node_tree.nodes; links = mat.node_tree.links
+        nodes.clear()
+        
+        out = nodes.new("ShaderNodeOutputMaterial"); out.location = (600, 0)
+        em = nodes.new("ShaderNodeEmission"); em.location = (400, 0)
+        
+        # --- EMISSION STRENGTH SET TO 10 ---
+        em.inputs['Strength'].default_value = 10.0
+        
+        links.new(em.outputs[0], out.inputs[0])
+        
+        attr = nodes.new("ShaderNodeAttribute")
+        attr.name = 'Baked_Layer'; attr.attribute_name = "md_layer_1"; attr.attribute_type = 'OBJECT'; attr.location = (200, 0)
+        links.new(attr.outputs[0], em.inputs[0])
+        
+        self.report({'INFO'}, "Switched to Baked View (md_layer_1)")
+        return {'FINISHED'}
+
 class ADVLIGHTING_OT_layer_toggle_solo(bpy.types.Operator):
     bl_idname = "advlighting.layer_toggle_solo"
     bl_label  = "Toggle Solo"
@@ -373,6 +410,7 @@ classes = (
     ADVLIGHTING_OT_layer_move,
     ADVLIGHTING_OT_apply_layer_order,
     ADVLIGHTING_OT_redraw_nodes,
+    ADVLIGHTING_OT_view_baked,
     ADVLIGHTING_OT_layer_toggle_solo,
     ADVLIGHTING_OT_layer_toggle_mute,
 )

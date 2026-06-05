@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Advanced Lighting (Layered V3)",
     "author": "Raghuvansh Agarwal",
-    "version": (3, 0, 2),
+    "version": (3, 0, 3),
     "blender": (4, 3, 0),
     "location": "View3D > Sidebar > Advanced Lighting",
     "description": "Multi-layer drone color engine with OKLCH & 4.3 Support",

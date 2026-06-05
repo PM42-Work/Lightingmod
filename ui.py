@@ -82,7 +82,8 @@ class ADVLIGHTING_PT_panel(bpy.types.Panel):
         box.template_list("ADVLIGHTING_UL_layers","",sc,"adv_layers",sc,"adv_layers_index",rows=3)
         
         redraw_row = box.row(); redraw_row.enabled = not sc.adv_needs_layer_rebuild
-        redraw_row.operator("advlighting.redraw_nodes",icon='FILE_REFRESH',text="Redraw Nodes")
+        redraw_row.operator("advlighting.redraw_nodes",icon='FILE_REFRESH',text="Layer Redraw")
+        redraw_row.operator("advlighting.view_baked", icon='RESTRICT_VIEW_OFF', text="Baked Redraw")
         
         if L:
             props_col = box.column(); props_col.enabled = not sc.adv_needs_layer_rebuild
