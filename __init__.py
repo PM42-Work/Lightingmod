@@ -37,6 +37,8 @@ def _on_active_layer_changed(self, context):
     utils.set_editor_filter_for_layer(context, f"Layer_{idx+1}")
 
 def get_layer_items(self, context):
+    if not context.scene.adv_layers:
+        return [('0', "No Layers", "")]
     return [(str(i), f"{i+1}: {item.name}", "") for i, item in enumerate(context.scene.adv_layers)]
 
 def _on_effector_type_changed(self, context):
