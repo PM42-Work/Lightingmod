@@ -1,10 +1,10 @@
 bl_info = {
-    "name": "Advanced Lighting (Layered V3)",
+    "name": "Advanced Lighting Control",
     "author": "Raghuvansh Agarwal",
-    "version": (3, 0, 3),
+    "version": (3, 0, 4),
     "blender": (4, 3, 0),
     "location": "View3D > Sidebar > Advanced Lighting",
-    "description": "Multi-layer drone color engine with OKLCH & 4.3 Support",
+    "description": "Multi-layer drone color engine",
     "category": "3D View",
 }
 
@@ -143,22 +143,24 @@ def register():
     sc.adv_noise_type = bpy.props.EnumProperty(
         name="Noise Type", items=[('PERLIN', 'Perlin (Clouds)', ''), ('VORONOI', 'Voronoi (Cells)', '')], default='PERLIN'
     )
-    # Advanced Noise Scaling Properties
     sc.adv_noise_scale_linked = bpy.props.BoolProperty(name="Linked", default=True)
     sc.adv_noise_scale_master = bpy.props.FloatProperty(name="Scale", default=0.02, min=0.001)
     sc.adv_noise_scale_xyz = bpy.props.FloatVectorProperty(name="Scale XYZ", default=(0.02, 0.02, 0.02), min=0.001, subtype='XYZ')
-    
     sc.adv_noise_contrast = bpy.props.FloatProperty(name="Contrast", default=0.0, min=0.0, max=1.0)
     sc.adv_noise_direction = bpy.props.FloatVectorProperty(name="Direction", default=(0.0, 0.0, 1.0), subtype='XYZ')
     sc.adv_noise_speed = bpy.props.FloatProperty(name="Speed", default=1.0)
+    
     sc.adv_noise_fade_in = bpy.props.IntProperty(name="Fade In", default=0, min=0)
+    sc.adv_noise_fade_in_mode = bpy.props.EnumProperty(
+        name="Fade In Mode", items=[('BLACK', 'Black', ''), ('WHITE', 'White', '')], default='BLACK'
+    )
     sc.adv_noise_fade_out = bpy.props.IntProperty(name="Fade Out", default=0, min=0)
+    sc.adv_noise_fade_out_mode = bpy.props.EnumProperty(
+        name="Fade Out Mode", items=[('BLACK', 'Black', ''), ('WHITE', 'White', '')], default='BLACK'
+    )
 
 def unregister():
     ui.unregister()
     operators.unregister()
     properties.unregister()
     bpy.utils.unregister_class(AdvLightingPreferences)
-    
-    # We will let Blender's garbage collector handle the properties safely upon unregistration
-    # to avoid bloat in the unregister function.

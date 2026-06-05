@@ -192,7 +192,6 @@ class ADVLIGHTING_PT_panel(bpy.types.Panel):
             box.label(text="Shape")
             box.prop(sc, "adv_noise_type", text="")
             
-            # Non-Uniform Noise Scaling UI
             row = box.row(align=True)
             if sc.adv_noise_scale_linked:
                 row.prop(sc, "adv_noise_scale_master", text="Scale")
@@ -209,9 +208,17 @@ class ADVLIGHTING_PT_panel(bpy.types.Panel):
             col.prop(sc, "adv_noise_direction", index=0, text="Flow X"); col.prop(sc, "adv_noise_direction", index=1, text="Flow Y"); col.prop(sc, "adv_noise_direction", index=2, text="Flow Z")
             row.operator("advlighting.draw_noise_flow", icon='BRUSH_DATA', text="Draw")
             box.prop(sc, "adv_noise_speed")
+            
+            # --- NEW UI LAYOUT ---
             box.label(text="Fading (Frames)")
-            row = box.row(align=True)
-            row.prop(sc, "adv_noise_fade_in", text="Fade In"); row.prop(sc, "adv_noise_fade_out", text="Fade Out")
+            row1 = box.row(align=True)
+            row1.prop(sc, "adv_noise_fade_in", text="Fade In")
+            row1.prop(sc, "adv_noise_fade_in_mode", expand=True)
+            
+            row2 = box.row(align=True)
+            row2.prop(sc, "adv_noise_fade_out", text="Fade Out")
+            row2.prop(sc, "adv_noise_fade_out_mode", expand=True)
+            
             box.label(text="Colors")
             ng = bpy.data.node_groups.get("AdvLightingNoiseRamp")
             if ng and "Ramp" in ng.nodes: 
