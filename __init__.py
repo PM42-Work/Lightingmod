@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Advanced Lighting",
     "author": "Raghuvansh Agarwal",
-    "version": (1, 3, 1),
+    "version": (1, 4, 0),
     "blender": (4, 1, 0),
     "location": "View3D > Sidebar > Advanced Lighting",
     "description": "Modular advanced drone color & effector controls",
@@ -64,6 +64,15 @@ def _on_active_layer_changed(self, context):
 def get_layer_items(self, context):
     return [(str(i), f"{i+1}: {item.name}", "") for i, item in enumerate(context.scene.ly_layers)]
 
+def _on_effector_type_changed(self, context):
+    if context.scene.effector_type == 'SPARKLE' and not context.scene.spark_profiles:
+        p = context.scene.spark_profiles.add()
+        p.name = "Base Profile"
+
+def _trigger_noise_preview(self, context):
+    from . import utils
+    utils.update_noise_preview(context)
+
 def register():
     bpy.utils.register_class(LightingModPreferences)
     properties.register()
@@ -92,11 +101,22 @@ def register():
           ('GRADIENT','Gradient',''),
           ('SPARKLE','Sparkle',''),
           ('TEMPORAL_SPARKLE','Temporal Sparkle',''),
+          ('NOISE', 'Noise', ''),
           ('DOMAIN','Domain',''),
           ('MOVIE','Movie UV',''),
           ('OFFSET','Offset',''),
-        ], default='SPARKLE'
+        ], default='SPARKLE', update=_on_effector_type_changed # <--- Added update hook
     )
+
+    sc.sparkle_style = EnumProperty(
+        name="Style",
+        items=[
+            ('PULSE', 'Pulse (Smooth Fade)', ''),
+            ('TWINKLE', 'Twinkle (Sharp Pop)', '')
+        ],
+        default='PULSE'
+    )
+
     sc.effector_start = IntProperty(name="Start", default=1)
     sc.effector_end = IntProperty(name="End", default=250)
     sc.effector_transition = IntProperty(name="Transition", default=10, min=0)
@@ -104,6 +124,10 @@ def register():
     sc.effector_selected_only = BoolProperty(name="Selected Only", default=False)
     sc.domain_object = PointerProperty(name="Domain Object", type=bpy.types.Object)
     sc.effector_duration = IntProperty(name="Duration", default=10, min=0)
+
+    # --- NEW PROPERTIES ---
+    sc.effector_absolute_position = FloatVectorProperty(name="Absolute Position", subtype='TRANSLATION', size=3, default=(0.0, 0.0, 0.0))
+    sc.needs_layer_rebuild = BoolProperty(default=False)
 
     sc.effector_colors = CollectionProperty(type=properties.LightingModEffectorColorItem)
     sc.effector_colors_index = IntProperty(default=0)
@@ -141,6 +165,23 @@ def register():
     sc.drone_formations_index = IntProperty()
     sc.temporal_stages = CollectionProperty(type=properties.LightingModTemporalStage)
     sc.temporal_stages_index = IntProperty()
+    sc.spark_profiles = CollectionProperty(type=properties.LightingModSparkProfile)
+    sc.spark_profiles_index = IntProperty(default=0)
+    sc.use_advanced_spark_profiles = BoolProperty(name="Use Multiple Profiles", default=False)
+
+    # --- NOISE PROPERTIES ---
+    sc.noise_type = bpy.props.EnumProperty(
+        name="Noise Type",
+        items=[('PERLIN', 'Perlin (Clouds)', ''), ('VORONOI', 'Voronoi (Cells)', '')], 
+        default='PERLIN', update=_trigger_noise_preview
+    )
+    
+    sc.noise_scale = bpy.props.FloatProperty(name="Scale", default=0.02, min=0.001, update=_trigger_noise_preview)
+    sc.noise_contrast = bpy.props.FloatProperty(name="Contrast", default=0.0, min=0.0, max=1.0, update=_trigger_noise_preview)
+    sc.noise_direction = bpy.props.FloatVectorProperty(name="Direction", default=(0.0, 0.0, 1.0), subtype='XYZ', update=_trigger_noise_preview)
+    sc.noise_speed = bpy.props.FloatProperty(name="Speed", default=1.0, update=_trigger_noise_preview)
+    sc.noise_fade_in = bpy.props.IntProperty(name="Fade In", default=0, min=0)
+    sc.noise_fade_out = bpy.props.IntProperty(name="Fade Out", default=0, min=0)
 
     try:
         if bpy.context and bpy.context.scene:
@@ -168,6 +209,8 @@ def unregister():
     del bpy.types.Scene.effector_selected_only
     del bpy.types.Scene.domain_object
     del bpy.types.Scene.effector_duration
+    del bpy.types.Scene.effector_absolute_position # <--- Clean up absolute position
+    del bpy.types.Scene.needs_layer_rebuild        # <--- Clean up UI lock flag
     del bpy.types.Scene.effector_colors
     del bpy.types.Scene.effector_colors_index
     del bpy.types.Scene.new_uv_map_name
@@ -187,6 +230,16 @@ def unregister():
     del bpy.types.Scene.drone_formations_index
     del bpy.types.Scene.temporal_stages
     del bpy.types.Scene.temporal_stages_index
+    del bpy.types.Scene.spark_profiles
+    del bpy.types.Scene.spark_profiles_index
+    del bpy.types.Scene.use_advanced_spark_profiles
+    del bpy.types.Scene.noise_type
+    del bpy.types.Scene.noise_scale
+    del bpy.types.Scene.noise_contrast
+    del bpy.types.Scene.noise_direction
+    del bpy.types.Scene.noise_speed
+    del bpy.types.Scene.noise_fade_in
+    del bpy.types.Scene.noise_fade_out
 
 if __name__ == "__main__":
     register()
