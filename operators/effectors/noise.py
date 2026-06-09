@@ -208,16 +208,37 @@ class ADVLIGHTING_OT_noise_effector(bpy.types.Operator):
             
             for i in range(3):
                 fc = o.animation_data.action.fcurves.find(f'["{prop_name}"]', index=i)
-                if not fc: fc = o.animation_data.action.fcurves.new(f'["{prop_name}"]', index=i)
-                fc.keyframe_points.clear()
+                if not fc: 
+                    fc = o.animation_data.action.fcurves.new(f'["{prop_name}"]', index=i)
+                    existing_pts = np.empty((0, 2), dtype=np.float32)
+                else:
+                    num_existing = len(fc.keyframe_points)
+                    if num_existing > 0:
+                        coords = np.zeros(num_existing * 2, dtype=np.float32)
+                        fc.keyframe_points.foreach_get('co', coords)
+                        existing_pts = coords.reshape((num_existing, 2))
+                        
+                        # SMART FILTER: Keep keyframes OUTSIDE the current target range
+                        mask = (existing_pts[:, 0] < start) | (existing_pts[:, 0] > end)
+                        existing_pts = existing_pts[mask]
+                    else:
+                        existing_pts = np.empty((0, 2), dtype=np.float32)
                 
-                pts = np.column_stack((final_frames, np.array(final_vals)[:, i]))
-                num_points = len(pts)
+                # Our new baked points
+                new_pts = np.column_stack((final_frames, np.array(final_vals)[:, i]))
+                
+                # Stitch them together and sort chronologically
+                combined_pts = np.vstack((existing_pts, new_pts))
+                combined_pts = combined_pts[combined_pts[:, 0].argsort()]
+                
+                # Instantly clear and overwrite with the combined array
+                fc.keyframe_points.clear() 
+                num_points = len(combined_pts)
                 fc.keyframe_points.add(num_points)
-                fc.keyframe_points.foreach_set('co', pts.flatten())
+                fc.keyframe_points.foreach_set('co', combined_pts.flatten())
                 fc.update()
                 
-                # OPTIMIZATION: Blazing fast C-level deselection instead of a Python for-loop
+                # Keep Graph Editor Clean
                 bool_arr = [False] * num_points
                 fc.keyframe_points.foreach_set('select_control_point', bool_arr)
                 fc.keyframe_points.foreach_set('select_left_handle', bool_arr)

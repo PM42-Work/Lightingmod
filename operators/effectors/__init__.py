@@ -9,6 +9,10 @@ classes = (
     
     domain.ADVLIGHTING_OT_domain_effector,
     
+    # --- MOVIE ---
+    movie.ADVLIGHTING_OT_load_movie_clip,
+    movie.ADVLIGHTING_OT_spawn_movie_camera,
+    movie.ADVLIGHTING_OT_remove_movie_cameras,
     movie.ADVLIGHTING_OT_movie_sampler,
     
     offset.ADVLIGHTING_OT_draw_offset_line,

@@ -2,10 +2,10 @@ import bpy
 import numpy as np
 import os
 import mathutils
-
+import bpy_extras
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty
-from ... import utils
+
 
 try:
     import cv2
@@ -13,33 +13,120 @@ try:
 except ImportError:
     HAS_OPENCV = False
 
-class ADVLIGHTING_OT_movie_sampler(bpy.types.Operator, ImportHelper):
-    bl_idname = "advlighting.movie_sampler"
-    bl_label  = "Project Video"
+class ADVLIGHTING_OT_load_movie_clip(bpy.types.Operator, ImportHelper):
+    bl_idname = "advlighting.load_movie_clip"
+    bl_label = "Import Video"
     bl_options = {'REGISTER', 'UNDO'}
     
-    filter_glob: StringProperty(default="*.mp4;*.mov;*.avi;*.mkv;*.webm", options={'HIDDEN'}, maxlen=255)
+    # Restrict the file browser to common video formats
+    filter_glob: StringProperty(
+        default="*.mp4;*.avi;*.mov;*.mkv;*.webm", 
+        options={'HIDDEN'}, 
+        maxlen=255
+    )
 
-    @classmethod
-    def poll(cls, context):
-        return context.area and context.area.type == 'VIEW_3D'
+    def execute(self, context):
+        sc = context.scene
+        if os.path.exists(self.filepath):
+            # Load the file into Blender's MovieClip data block
+            clip = bpy.data.movieclips.load(self.filepath)
+            sc.adv_movie_clip = clip
+            self.report({'INFO'}, f"Loaded Video: {clip.name}")
+        return {'FINISHED'}
 
-    def invoke(self, context, event):
-        context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
+class ADVLIGHTING_OT_spawn_movie_camera(bpy.types.Operator):
+    bl_idname = "advlighting.spawn_movie_camera"
+    bl_label = "Spawn Movie Camera"
+    
+    def execute(self, context):
+        sc = context.scene
+        if not sc.adv_movie_clip:
+            self.report({'ERROR'}, "Select or Open a Video Clip first!")
+            return {'CANCELLED'}
+            
+        cam_data = bpy.data.cameras.new(name="Movie_Cam_Data")
+        cam_data.show_background_images = True
+        bg = cam_data.background_images.new()
+        
+        # Assign the Movie Clip so it plays in the viewport
+        bg.source = 'MOVIE_CLIP'
+        bg.clip = sc.adv_movie_clip
+        bg.alpha = 0.8  
+        bg.display_depth = 'FRONT'
+        bg.frame_method = 'FIT'
+        
+        cam_obj = bpy.data.objects.new("Movie_Projector", cam_data)
+        cam_obj["is_adv_movie_cam"] = True 
+        
+        context.scene.collection.objects.link(cam_obj)
+        
+        if context.region_data and context.area.type == 'VIEW_3D':
+            cam_obj.matrix_world = context.region_data.view_matrix.inverted()
+            context.space_data.camera = cam_obj
+            context.region_data.view_perspective = 'CAMERA'
+            
+        sc.adv_movie_camera = cam_obj
+        self.report({'INFO'}, "Movie Camera spawned! Align it to target your drones.")
+        return {'FINISHED'}
+
+
+class ADVLIGHTING_OT_remove_movie_cameras(bpy.types.Operator):
+    bl_idname = "advlighting.remove_movie_cameras"
+    bl_label = "Clear All Movie Cameras"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        count = 0
+        for obj in list(bpy.data.objects):
+            if "is_adv_movie_cam" in obj:
+                cam_data = obj.data
+                bpy.data.objects.remove(obj, do_unlink=True)
+                if cam_data:
+                    bpy.data.cameras.remove(cam_data, do_unlink=True)
+                count += 1
+                
+        context.scene.adv_movie_camera = None
+        self.report({'INFO'}, f"Deleted {count} Movie Cameras")
+        return {'FINISHED'}
+
+
+class ADVLIGHTING_OT_movie_sampler(bpy.types.Operator):
+    bl_idname = "advlighting.movie_sampler"
+    bl_label = "Apply Movie Projector"
 
     def execute(self, context):
         if not HAS_OPENCV:
-            self.report({'ERROR'}, "OpenCV not found. Please check addon dependencies.")
+            self.report({'ERROR'}, "OpenCV not found. Run dependencies setup.")
             return {'CANCELLED'}
 
-        if not os.path.exists(self.filepath): return {'CANCELLED'}
-
         sc = context.scene
-        start, end, step = sc.adv_effector_start, sc.adv_effector_end, sc.adv_movie_step
-        frames = list(range(start, end + 1, max(1, step)))
-
-        # 1. IDENTIFY DRONES
+        cam_obj = sc.adv_movie_camera
+        clip_data = sc.adv_movie_clip
+        
+        if not cam_obj or not clip_data:
+            self.report({'ERROR'}, "Missing Movie Camera or Video Clip.")
+            return {'CANCELLED'}
+            
+        path = bpy.path.abspath(clip_data.filepath)
+        if not os.path.exists(path):
+            self.report({'ERROR'}, "Video file missing from disk.")
+            return {'CANCELLED'}
+            
+        # Initialize OpenCV Video Reader
+        cap = cv2.VideoCapture(path)
+        if not cap.isOpened():
+            self.report({'ERROR'}, "Failed to open video file with OpenCV.")
+            return {'CANCELLED'}
+            
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        start, end = sc.adv_effector_start, sc.adv_effector_end
+        frames = list(range(start, end + 1))
+        prop_name = f"Layer_{int(sc.adv_effector_target_layer)+1}"
+        
+        # Gather Drones
         objs = []
         if sc.adv_effector_selection_mode == 'GROUP' and sc.adv_drone_formations:
              if sc.adv_drone_formations[sc.adv_drone_formations_index].groups:
@@ -50,158 +137,129 @@ class ADVLIGHTING_OT_movie_sampler(bpy.types.Operator, ImportHelper):
 
         drones = [o for o in objs if o.get("md_sphere") and o.type=='MESH' and "Absolute_Position" in o.keys()]
         if not drones:
-            self.report({'ERROR'}, "No valid drones found. (Did you Bake Positions first?)")
+            self.report({'ERROR'}, "No valid drones found.")
             return {'CANCELLED'}
-
-        cap = cv2.VideoCapture(self.filepath)
-        if not cap.isOpened(): return {'CANCELLED'}
         
-        vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        vid_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        vid_aspect = vid_w / max(1, vid_h)
-
-        proj_matrix = context.region_data.perspective_matrix
-        drone_paths = {} 
-        min_x, max_x = float('inf'), float('-inf')
-        min_y, max_y = float('inf'), float('-inf')
-
-        self.report({'INFO'}, "Calculating Projection Bounds...")
-        
+        drone_paths = {}
         for d in drones:
-            drone_paths[d.name] = {}
+            px, py, pz = d["Absolute_Position"]
             anim = getattr(d, "animation_data", None)
+            fcurves = [anim.action.fcurves.find('["Absolute_Position"]', index=i) if anim and anim.action else None for i in range(3)]
             
-            fcurves = [None, None, None]
-            if anim and anim.action:
-                fcurves = [anim.action.fcurves.find('["Absolute_Position"]', index=i) for i in range(3)]
-                
-            px_base, py_base, pz_base = d["Absolute_Position"]
-
+            drone_paths[d.name] = {}
             for f in frames:
-                px = fcurves[0].evaluate(f) if fcurves[0] else px_base
-                py = fcurves[1].evaluate(f) if fcurves[1] else py_base
-                pz = fcurves[2].evaluate(f) if fcurves[2] else pz_base
+                x = fcurves[0].evaluate(f) if fcurves[0] else px
+                y = fcurves[1].evaluate(f) if fcurves[1] else py
+                z = fcurves[2].evaluate(f) if fcurves[2] else pz
+                drone_paths[d.name][f] = mathutils.Vector((x,y,z))
                 
-                vec4 = proj_matrix @ mathutils.Vector((px, py, pz, 1.0))
-                
-                if vec4.w > 0.001: 
-                    nx, ny = vec4.x / vec4.w, vec4.y / vec4.w
-                    min_x = min(min_x, nx)
-                    max_x = max(max_x, nx)
-                    min_y = min(min_y, ny)
-                    max_y = max(max_y, ny)
-                else:
-                    nx, ny = -9999.0, -9999.0 
-                
-                drone_paths[d.name][f] = (nx, ny)
-
-        if min_x == float('inf'):
-            min_x, max_x = -1.0, 1.0
-            min_y, max_y = -1.0, 1.0
-
-        swarm_w = max(1.0, max_x - min_x)
-        swarm_h = max(1.0, max_y - min_y)
-        swarm_aspect = swarm_w / swarm_h
+        px_coords = np.zeros((len(frames), len(drones), 2), dtype=np.int32)
+        valid_mask = np.zeros((len(frames), len(drones)), dtype=bool)
         
-        cx, cy = (min_x + max_x) / 2.0, (min_y + max_y) / 2.0
+        # Dynamic Aspect Ratio Correction
+        render = sc.render
+        cam_aspect = (render.resolution_x * render.pixel_aspect_x) / max(1.0, (render.resolution_y * render.pixel_aspect_y))
+        img_aspect = w / max(1.0, h)
         
-        if vid_aspect > swarm_aspect: map_h, map_w = swarm_h, swarm_h * vid_aspect
-        else: map_w, map_h = swarm_w, swarm_w / vid_aspect
-
-        map_min_x = cx - (map_w / 2.0)
-        map_min_y = cy - (map_h / 2.0)
-
-        num_frames = len(frames)
-        num_drones = len(drones)
-        drone_names = [d.name for d in drones]
+        wm = context.window_manager
+        wm.progress_begin(0, len(frames) * 2) # 2 phases: Matrix calc, then Video extraction
         
-        px_coords = np.zeros((num_frames, num_drones, 2), dtype=np.int32)
-        valid_mask = np.zeros((num_frames, num_drones), dtype=bool)
-        sampled_colors = np.zeros((num_frames, num_drones, 3), dtype=np.float32)
-        
+        # Phase 1: 3D to 2D Projection
         for f_idx, f in enumerate(frames):
-            for d_idx, d_name in enumerate(drone_names):
-                nx, ny = drone_paths[d_name][f]
+            sc.frame_set(f) 
+            for d_idx, d in enumerate(drones):
+                p = drone_paths[d.name][f]
+                co2d = bpy_extras.object_utils.world_to_camera_view(sc, cam_obj, p)
                 
-                if nx != -9999.0:
-                    u = (nx - map_min_x) / map_w
-                    v = (ny - map_min_y) / map_h
+                if co2d.z > 0: 
+                    u = co2d.x
+                    v = co2d.y
                     
-                    px_x = int(u * (vid_w - 1))
-                    px_y = int((1.0 - v) * (vid_h - 1))
-                    
-                    if 0 <= px_x < vid_w and 0 <= px_y < vid_h:
-                        px_coords[f_idx, d_idx, 0] = px_x
-                        px_coords[f_idx, d_idx, 1] = px_y
-                        valid_mask[f_idx, d_idx] = True
-
-        self.report({'INFO'}, "Sampling Video Frames...")
-        current_vid_frame = 0
-        
-        for f_idx, f in enumerate(frames):
-            target_vid_frame = max(0, f - 1)
+                    if cam_aspect > img_aspect:
+                        u = (u - 0.5) * (cam_aspect / img_aspect) + 0.5
+                    else:
+                        v = (v - 0.5) * (img_aspect / cam_aspect) + 0.5
+                        
+                    if 0.0 <= u <= 1.0 and 0.0 <= v <= 1.0:
+                        ix = int(u * (w - 1))
+                        iy = int((1.0 - v) * (h - 1)) 
+                        if 0 <= ix < w and 0 <= iy < h:
+                            px_coords[f_idx, d_idx, 0] = ix
+                            px_coords[f_idx, d_idx, 1] = iy
+                            valid_mask[f_idx, d_idx] = True
+            wm.progress_update(f_idx)
             
-            if target_vid_frame < current_vid_frame:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, target_vid_frame)
-                current_vid_frame = target_vid_frame
-                
-            while current_vid_frame < target_vid_frame:
-                cap.grab(); current_vid_frame += 1
-                
-            ret, frame_img = cap.retrieve(); current_vid_frame += 1
+        # Phase 2: OpenCV Pixel Extraction
+        sampled_rgb = np.zeros((len(frames), len(drones), 3), dtype=np.float32)
+        
+        for f_idx, f in enumerate(frames):
+            # Calculate which frame to pull from the video (Loops automatically if too short)
+            vid_frame = (f - start) % total_video_frames
+            cap.set(cv2.CAP_PROP_POS_FRAMES, vid_frame)
+            
+            ret, frame = cap.read()
             if not ret: continue
             
-            x_coords = px_coords[f_idx, :, 0]
-            y_coords = px_coords[f_idx, :, 1]
             mask = valid_mask[f_idx, :]
+            if np.any(mask):
+                xc, yc = px_coords[f_idx, mask, 0], px_coords[f_idx, mask, 1]
+                # OpenCV uses BGR. We extract the pixels and slice [::-1] to flip to RGB!
+                bgr_pixels = frame[yc, xc]
+                rgb_pixels = bgr_pixels[:, ::-1] / 255.0
+                sampled_rgb[f_idx, mask] = rgb_pixels
+                
+            wm.progress_update(len(frames) + f_idx)
             
-            if not np.any(mask): continue
-            
-            bgr_colors = frame_img[y_coords[mask], x_coords[mask]]
-            sampled_colors[f_idx, mask, 0] = bgr_colors[:, 2] / 255.0
-            sampled_colors[f_idx, mask, 1] = bgr_colors[:, 1] / 255.0 
-            sampled_colors[f_idx, mask, 2] = bgr_colors[:, 0] / 255.0
-        
         cap.release()
-        drone_colors = {drone_names[i]: sampled_colors[:, i, :] for i in range(num_drones)}
+        wm.progress_end()
         
-        self.save_keyframes(context, drones, frames, drone_colors)
-        self.report({'INFO'}, f"Successfully projected video onto {num_drones} drones.")
-        return {'FINISHED'}
-
-    def save_keyframes(self, context, drones, frames, drone_colors):
-        sc = context.scene
-        prop_name = f"Layer_{int(sc.adv_effector_target_layer)+1}"
+        # Gamma Correction: Convert sRGB video to Blender's Linear color space
+        linear_rgb = np.where(sampled_rgb <= 0.04045, sampled_rgb / 12.92, ((sampled_rgb + 0.055) / 1.055) ** 2.4)
+        
         data_path = f'["{prop_name}"]'
+        frames_np = np.array(frames, dtype=np.float32)
         
-        for d in drones:
-            colors = drone_colors.get(d.name)
-            if colors is None: continue
-            
+        # Phase 3: Splicing Keyframes safely
+        for d_idx, d in enumerate(drones):
             if prop_name not in d.keys(): d[prop_name] = [0.0, 0.0, 0.0, 1.0]
             if not d.animation_data: d.animation_data_create()
-            if not d.animation_data.action: d.animation_data.action = bpy.data.actions.new(name=f"{d.name}Action")
+            if not d.animation_data.action: d.animation_data.action = bpy.data.actions.new(name=f"{d.name}_Anim")
             action = d.animation_data.action
-            
-            f_np = np.array(frames, dtype=np.float32)
             
             for i in range(3):
                 fc = action.fcurves.find(data_path=data_path, index=i)
-                if not fc: fc = action.fcurves.new(data_path=data_path, index=i)
-                
-                existing = []
-                for kp in fc.keyframe_points:
-                    if kp.co[0] < frames[0] or kp.co[0] > frames[-1]:
-                        existing.append((kp.co[0], kp.co[1]))
-                
-                new_keys = np.column_stack((f_np, colors[:, i]))
-                if existing:
-                    all_keys = np.vstack((existing, new_keys))
-                    all_keys = all_keys[all_keys[:, 0].argsort()]
+                if not fc: 
+                    fc = action.fcurves.new(data_path=data_path, index=i)
+                    existing_pts = np.empty((0, 2), dtype=np.float32)
                 else:
-                    all_keys = new_keys
+                    num_existing = len(fc.keyframe_points)
+                    if num_existing > 0:
+                        coords = np.zeros(num_existing * 2, dtype=np.float32)
+                        fc.keyframe_points.foreach_get('co', coords)
+                        existing_pts = coords.reshape((num_existing, 2))
+                        
+                        # Preserve data outside of start/end range
+                        mask = (existing_pts[:, 0] < start) | (existing_pts[:, 0] > end)
+                        existing_pts = existing_pts[mask]
+                    else:
+                        existing_pts = np.empty((0, 2), dtype=np.float32)
                 
-                fc.keyframe_points.clear()
-                fc.keyframe_points.add(len(all_keys))
-                fc.keyframe_points.foreach_set('co', all_keys.flatten())
+                col_arr = linear_rgb[:, d_idx, :]
+                new_pts = np.column_stack((frames_np, col_arr[:, i]))
+                
+                combined_pts = np.vstack((existing_pts, new_pts))
+                combined_pts = combined_pts[combined_pts[:, 0].argsort()]
+                
+                fc.keyframe_points.clear() 
+                num_points = len(combined_pts)
+                fc.keyframe_points.add(num_points)
+                fc.keyframe_points.foreach_set('co', combined_pts.flatten())
                 fc.update()
+                
+                bool_arr = [False] * num_points
+                fc.keyframe_points.foreach_set('select_control_point', bool_arr)
+                fc.keyframe_points.foreach_set('select_left_handle', bool_arr)
+                fc.keyframe_points.foreach_set('select_right_handle', bool_arr)
+                
+        self.report({'INFO'}, "Movie Projection Baked Successfully!")
+        return {'FINISHED'}

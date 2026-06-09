@@ -318,9 +318,18 @@ class ADVLIGHTING_PT_panel(bpy.types.Panel):
             row=box.row(align=True); row.operator("advlighting.effector_color_add",icon='ADD',text=""); row.operator("advlighting.effector_color_remove",icon='REMOVE',text="")
 
         elif tp == 'MOVIE':
-            box.label(text="Viewport Projection", icon='RESTRICT_VIEW_OFF')
-            box.label(text="Note: Bakes based on your current 3D camera angle.", icon='INFO')
-            box.prop(sc, "adv_movie_step")
+            box.label(text="Video Projection", icon='FILE_MOVIE')
+            
+            row = box.row(align=True)
+            row.prop(sc, "adv_movie_clip", text="")
+            row.operator("advlighting.load_movie_clip", icon='FILEBROWSER', text="")
+            
+            row = box.row(align=True)
+            row.operator("advlighting.spawn_movie_camera", icon='ADD', text="Spawn Camera")
+            row.operator("advlighting.remove_movie_cameras", icon='TRASH', text="Clear All")
+            
+            if sc.adv_movie_camera:
+                box.prop(sc, "adv_movie_camera", text="Active")
 
         box.operator("advlighting.apply_effectors", text="Apply")
 

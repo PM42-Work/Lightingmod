@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Advanced Lighting Control",
     "author": "Raghuvansh Agarwal",
-    "version": (3, 0, 6),
+    "version": (3, 0, 7),
     "blender": (4, 3, 0),
     "location": "View3D > Sidebar > Advanced Lighting",
     "description": "Multi-layer drone lighting design engine",
@@ -118,7 +118,10 @@ def register():
     sc.adv_effector_duration = IntProperty(name="Duration", default=10, min=0)
     sc.adv_effector_colors = CollectionProperty(type=properties.AdvLightingEffectorColorItem)
     sc.adv_effector_colors_index = IntProperty(default=0)
-    sc.adv_movie_step = IntProperty(name="Step", default=1, min=1)
+    
+    # --- MOVIE PROPERTIES ---
+    sc.adv_movie_clip = bpy.props.PointerProperty(type=bpy.types.MovieClip, name="Video Clip")
+    sc.adv_movie_camera = bpy.props.PointerProperty(type=bpy.types.Object, name="Movie Camera")
 
     sc.adv_gradient_mode = EnumProperty(
         name="Mode", items=[

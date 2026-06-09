@@ -254,15 +254,30 @@ class ADVLIGHTING_OT_apply_gobo(bpy.types.Operator):
             
             for i in range(3):
                 fc = action.fcurves.find(data_path=data_path, index=i)
-                if not fc: fc = action.fcurves.new(data_path=data_path, index=i)
+                if not fc: 
+                    fc = action.fcurves.new(data_path=data_path, index=i)
+                    existing_pts = np.empty((0, 2), dtype=np.float32)
+                else:
+                    num_existing = len(fc.keyframe_points)
+                    if num_existing > 0:
+                        coords = np.zeros(num_existing * 2, dtype=np.float32)
+                        fc.keyframe_points.foreach_get('co', coords)
+                        existing_pts = coords.reshape((num_existing, 2))
+                        mask = (existing_pts[:, 0] < start) | (existing_pts[:, 0] > end)
+                        existing_pts = existing_pts[mask]
+                    else:
+                        existing_pts = np.empty((0, 2), dtype=np.float32)
                 
                 col_arr = final_colors[:, d_idx, :]
-                fc.keyframe_points.clear() 
+                new_pts = np.column_stack((frames_np, col_arr[:, i]))
                 
-                pts = np.column_stack((frames_np, col_arr[:, i]))
-                num_points = len(pts)
+                combined_pts = np.vstack((existing_pts, new_pts))
+                combined_pts = combined_pts[combined_pts[:, 0].argsort()]
+                
+                fc.keyframe_points.clear() 
+                num_points = len(combined_pts)
                 fc.keyframe_points.add(num_points)
-                fc.keyframe_points.foreach_set('co', pts.flatten())
+                fc.keyframe_points.foreach_set('co', combined_pts.flatten())
                 fc.update()
                 
                 bool_arr = [False] * num_points
