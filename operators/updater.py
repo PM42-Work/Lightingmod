@@ -117,9 +117,13 @@ class ADVLIGHTING_OT_perform_update(bpy.types.Operator):
                 if self._state['error']:
                     self.report({'ERROR'}, f"Update Failed: {self._state['error']}")
                 else:
-                    def draw_success(self, ctx):
-                        self.layout.label(text=f"Successfully updated to {self.tag_name}.")
-                        self.layout.label(text="Please restart Blender to apply changes.")
+                    # Save the tag name to a local variable to prevent 'self' scope clashing
+                    updated_tag = self.tag_name 
+                    
+                    def draw_success(popup, ctx):
+                        popup.layout.label(text=f"Successfully updated to {updated_tag}.")
+                        popup.layout.label(text="Please restart Blender to apply changes.")
+                        
                     context.window_manager.popup_menu(draw_success, title="Update Complete", icon='CHECKMARK')
                     self.report({'INFO'}, "Update complete. Restart Blender.")
                     
