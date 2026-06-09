@@ -6,7 +6,6 @@ import bpy_extras
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty
 
-
 try:
     import cv2
     HAS_OPENCV = True
@@ -18,7 +17,6 @@ class ADVLIGHTING_OT_load_movie_clip(bpy.types.Operator, ImportHelper):
     bl_label = "Import Video"
     bl_options = {'REGISTER', 'UNDO'}
     
-    # Restrict the file browser to common video formats
     filter_glob: StringProperty(
         default="*.mp4;*.avi;*.mov;*.mkv;*.webm", 
         options={'HIDDEN'}, 
@@ -28,11 +26,11 @@ class ADVLIGHTING_OT_load_movie_clip(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         sc = context.scene
         if os.path.exists(self.filepath):
-            # Load the file into Blender's MovieClip data block
             clip = bpy.data.movieclips.load(self.filepath)
             sc.adv_movie_clip = clip
             self.report({'INFO'}, f"Loaded Video: {clip.name}")
         return {'FINISHED'}
+
 
 class ADVLIGHTING_OT_spawn_movie_camera(bpy.types.Operator):
     bl_idname = "advlighting.spawn_movie_camera"
@@ -48,12 +46,15 @@ class ADVLIGHTING_OT_spawn_movie_camera(bpy.types.Operator):
         cam_data.show_background_images = True
         bg = cam_data.background_images.new()
         
-        # Assign the Movie Clip so it plays in the viewport
         bg.source = 'MOVIE_CLIP'
         bg.clip = sc.adv_movie_clip
         bg.alpha = 0.8  
         bg.display_depth = 'FRONT'
         bg.frame_method = 'FIT'
+        
+        # --- Sync Viewport Playback to Effector Start Frame on Spawn ---
+        if bg.clip:
+            bg.clip.frame_start = sc.adv_effector_start
         
         cam_obj = bpy.data.objects.new("Movie_Projector", cam_data)
         cam_obj["is_adv_movie_cam"] = True 
@@ -66,7 +67,7 @@ class ADVLIGHTING_OT_spawn_movie_camera(bpy.types.Operator):
             context.region_data.view_perspective = 'CAMERA'
             
         sc.adv_movie_camera = cam_obj
-        self.report({'INFO'}, "Movie Camera spawned! Align it to target your drones.")
+        self.report({'INFO'}, "Movie Camera spawned and synchronized to Effector Start Frame!")
         return {'FINISHED'}
 
 
@@ -112,7 +113,12 @@ class ADVLIGHTING_OT_movie_sampler(bpy.types.Operator):
             self.report({'ERROR'}, "Video file missing from disk.")
             return {'CANCELLED'}
             
-        # Initialize OpenCV Video Reader
+        # --- Dynamic Viewport Re-Sync in case the user modified timelines ---
+        if cam_obj.data.background_images:
+            for bg in cam_obj.data.background_images:
+                if bg.source == 'MOVIE_CLIP' and bg.clip:
+                    bg.clip.frame_start = sc.adv_effector_start
+            
         cap = cv2.VideoCapture(path)
         if not cap.isOpened():
             self.report({'ERROR'}, "Failed to open video file with OpenCV.")
@@ -126,7 +132,6 @@ class ADVLIGHTING_OT_movie_sampler(bpy.types.Operator):
         frames = list(range(start, end + 1))
         prop_name = f"Layer_{int(sc.adv_effector_target_layer)+1}"
         
-        # Gather Drones
         objs = []
         if sc.adv_effector_selection_mode == 'GROUP' and sc.adv_drone_formations:
              if sc.adv_drone_formations[sc.adv_drone_formations_index].groups:
@@ -156,13 +161,12 @@ class ADVLIGHTING_OT_movie_sampler(bpy.types.Operator):
         px_coords = np.zeros((len(frames), len(drones), 2), dtype=np.int32)
         valid_mask = np.zeros((len(frames), len(drones)), dtype=bool)
         
-        # Dynamic Aspect Ratio Correction
         render = sc.render
         cam_aspect = (render.resolution_x * render.pixel_aspect_x) / max(1.0, (render.resolution_y * render.pixel_aspect_y))
         img_aspect = w / max(1.0, h)
         
         wm = context.window_manager
-        wm.progress_begin(0, len(frames) * 2) # 2 phases: Matrix calc, then Video extraction
+        wm.progress_begin(0, len(frames) * 2) 
         
         # Phase 1: 3D to 2D Projection
         for f_idx, f in enumerate(frames):
@@ -189,21 +193,28 @@ class ADVLIGHTING_OT_movie_sampler(bpy.types.Operator):
                             valid_mask[f_idx, d_idx] = True
             wm.progress_update(f_idx)
             
-        # Phase 2: OpenCV Pixel Extraction
+        # Phase 2: OpenCV Pixel Extraction (Sequential Read Optimization)
         sampled_rgb = np.zeros((len(frames), len(drones), 3), dtype=np.float32)
         
+        current_vid_frame = 0
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        
         for f_idx, f in enumerate(frames):
-            # Calculate which frame to pull from the video (Loops automatically if too short)
-            vid_frame = (f - start) % total_video_frames
-            cap.set(cv2.CAP_PROP_POS_FRAMES, vid_frame)
+            target_vid_frame = (f - start) % total_video_frames
             
+            # ONLY seek when we loop around to the beginning
+            if target_vid_frame != current_vid_frame:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target_vid_frame)
+                current_vid_frame = target_vid_frame
+                
             ret, frame = cap.read()
             if not ret: continue
+            
+            current_vid_frame += 1
             
             mask = valid_mask[f_idx, :]
             if np.any(mask):
                 xc, yc = px_coords[f_idx, mask, 0], px_coords[f_idx, mask, 1]
-                # OpenCV uses BGR. We extract the pixels and slice [::-1] to flip to RGB!
                 bgr_pixels = frame[yc, xc]
                 rgb_pixels = bgr_pixels[:, ::-1] / 255.0
                 sampled_rgb[f_idx, mask] = rgb_pixels
