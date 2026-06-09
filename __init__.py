@@ -1,10 +1,10 @@
 bl_info = {
     "name": "Advanced Lighting Control",
     "author": "Raghuvansh Agarwal",
-    "version": (3, 0, 4),
+    "version": (3, 0, 5),
     "blender": (4, 3, 0),
     "location": "View3D > Sidebar > Advanced Lighting",
-    "description": "Multi-layer drone color engine",
+    "description": "Multi-layer drone lighting design engine",
     "category": "3D View",
 }
 
@@ -103,7 +103,7 @@ def register():
         name="Type",
         items=[
           ('GRADIENT','Gradient',''), ('SPARKLE','Sparkle',''), ('TEMPORAL_SPARKLE','Temporal Sparkle',''),
-          ('NOISE', 'Noise', ''), ('DOMAIN','Domain',''), ('MOVIE','Movie Proj',''), ('OFFSET','Offset',''),
+          ('NOISE', 'Noise', ''), ('GOBO', 'Gobo Projector', ''), ('DOMAIN','Domain',''), ('MOVIE','Movie Proj',''), ('OFFSET','Offset',''),
         ], default='SPARKLE', update=_on_effector_type_changed
     )
     sc.adv_sparkle_style = EnumProperty(
@@ -141,14 +141,29 @@ def register():
     sc.adv_use_advanced_spark_profiles = BoolProperty(name="Use Multiple Profiles", default=False)
 
     sc.adv_noise_type = bpy.props.EnumProperty(
-        name="Noise Type", items=[('PERLIN', 'Perlin (Clouds)', ''), ('VORONOI', 'Voronoi (Cells)', '')], default='PERLIN'
+        name="Noise Type", items=[
+            ('PERLIN', 'Perlin (Clouds)', ''), 
+            ('VORONOI', 'Voronoi (Cells)', ''),
+            ('WAVE', 'Wave (Stripes)', ''),
+            ('MUSGRAVE', 'Musgrave (Fractal)', ''),
+            ('CELL', 'Cell (Blocky)', '')
+        ], default='PERLIN'
     )
+    
     sc.adv_noise_scale_linked = bpy.props.BoolProperty(name="Linked", default=True)
     sc.adv_noise_scale_master = bpy.props.FloatProperty(name="Scale", default=0.02, min=0.001)
     sc.adv_noise_scale_xyz = bpy.props.FloatVectorProperty(name="Scale XYZ", default=(0.02, 0.02, 0.02), min=0.001, subtype='XYZ')
+    
+    sc.adv_noise_wave_distortion = bpy.props.FloatProperty(name="Distortion", default=0.0, min=0.0)
+    sc.adv_noise_musgrave_detail = bpy.props.IntProperty(name="Detail (Octaves)", default=2, min=1, max=16)
+    sc.adv_noise_musgrave_roughness = bpy.props.FloatProperty(name="Roughness", default=2.0, min=0.0)
+
     sc.adv_noise_contrast = bpy.props.FloatProperty(name="Contrast", default=0.0, min=0.0, max=1.0)
-    sc.adv_noise_direction = bpy.props.FloatVectorProperty(name="Direction", default=(0.0, 0.0, 1.0), subtype='XYZ')
-    sc.adv_noise_speed = bpy.props.FloatProperty(name="Speed", default=1.0)
+    sc.adv_noise_direction = bpy.props.FloatVectorProperty(name="Flow Dir", default=(0.0, 0.0, 1.0), subtype='XYZ')
+    sc.adv_noise_speed = bpy.props.FloatProperty(name="Flow Speed", default=1.0)
+    
+    sc.adv_noise_rotation_axis = bpy.props.FloatVectorProperty(name="Rot Axis", default=(0.0, 0.0, 1.0), subtype='XYZ')
+    sc.adv_noise_rotation_speed = bpy.props.FloatProperty(name="Rot Speed", default=0.0)
     
     sc.adv_noise_fade_in = bpy.props.IntProperty(name="Fade In", default=0, min=0)
     sc.adv_noise_fade_in_mode = bpy.props.EnumProperty(
@@ -157,6 +172,24 @@ def register():
     sc.adv_noise_fade_out = bpy.props.IntProperty(name="Fade Out", default=0, min=0)
     sc.adv_noise_fade_out_mode = bpy.props.EnumProperty(
         name="Fade Out Mode", items=[('BLACK', 'Black', ''), ('WHITE', 'White', '')], default='BLACK'
+    )
+
+
+    # --- NEW: GOBO PROPERTIES ---
+    sc.adv_gobo_image = bpy.props.PointerProperty(type=bpy.types.Image, name="Gobo Image")
+    sc.adv_gobo_camera = bpy.props.PointerProperty(type=bpy.types.Object, name="Gobo Camera")
+    sc.adv_gobo_invert = bpy.props.BoolProperty(name="Invert Mask", default=False)
+    
+    # Motion & Rotation
+    sc.adv_gobo_pos_dir = bpy.props.FloatVectorProperty(name="Pos Dir", size=2, default=(1.0, 0.0))
+    sc.adv_gobo_pos_speed = bpy.props.FloatProperty(name="Pos Speed", default=0.0)
+    sc.adv_gobo_pos_mode = bpy.props.EnumProperty(
+        name="Pos Mode", items=[('CYCLE', 'Cycle', ''), ('BOUNCE', 'Bounce', '')], default='CYCLE'
+    )
+    
+    sc.adv_gobo_rot_speed = bpy.props.FloatProperty(name="Rot Speed", default=0.0)
+    sc.adv_gobo_rot_mode = bpy.props.EnumProperty(
+        name="Rot Mode", items=[('CYCLE', 'Cycle', ''), ('BOUNCE', 'Bounce', '')], default='CYCLE'
     )
 
 def unregister():

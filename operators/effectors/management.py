@@ -1,5 +1,6 @@
 import bpy
 import colorsys
+import mathutils  # <--- Added this!
 from bpy_extras import view3d_utils
 from ... import utils
 
@@ -11,6 +12,7 @@ class ADVLIGHTING_OT_apply_effectors(bpy.types.Operator):
         elif t=='SPARKLE':  return bpy.ops.advlighting.sparkle()
         elif t=='TEMPORAL_SPARKLE': return bpy.ops.advlighting.temporal_sparkle()
         elif t=='NOISE':    return bpy.ops.advlighting.noise_effector()
+        elif t=='GOBO':     return bpy.ops.advlighting.apply_gobo()
         elif t=='DOMAIN':   return bpy.ops.advlighting.domain()
         elif t=='MOVIE':    return bpy.ops.advlighting.movie_sampler('INVOKE_DEFAULT')
         elif t=='OFFSET':   return bpy.ops.advlighting.offset_keyframes()
@@ -199,3 +201,36 @@ class ADVLIGHTING_OT_draw_noise_flow(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         self.report({'INFO'}, "Click first point for Flow Direction")
         return {'RUNNING_MODAL'}
+
+class ADVLIGHTING_OT_align_noise_camera(bpy.types.Operator):
+    bl_idname = "advlighting.align_noise_camera"
+    bl_label = "Align to View"
+    bl_description = "Aligns the Noise Flow and Rotation axis to the current viewport camera"
+    
+    @classmethod
+    def poll(cls, context):
+        return context.area and context.area.type == 'VIEW_3D'
+        
+    def execute(self, context):
+        sc = context.scene
+        region3d = context.region_data
+        if not region3d: return {'CANCELLED'}
+        
+        view_matrix = region3d.view_matrix.inverted()
+        # The camera looks directly down the -Z axis of its local matrix
+        look_dir = view_matrix.to_3x3() @ mathutils.Vector((0.0, 0.0, -1.0))
+        look_dir.normalize()
+        
+        sc.adv_noise_direction = look_dir
+        sc.adv_noise_rotation_axis = look_dir
+        
+        self.report({'INFO'}, "Noise axes automatically aligned to Viewport Camera")
+        return {'FINISHED'}
+    
+class ADVLIGHTING_OT_create_gobo_nodegroup(bpy.types.Operator):
+    bl_idname = "advlighting.create_gobo_nodegroup"
+    bl_label = "Create Gobo Ramp"
+    def execute(self, context):
+        from ... import utils
+        utils.ensure_gobo_nodegroup()
+        return {'FINISHED'}

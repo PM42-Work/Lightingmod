@@ -192,6 +192,13 @@ class ADVLIGHTING_PT_panel(bpy.types.Panel):
             box.label(text="Shape")
             box.prop(sc, "adv_noise_type", text="")
             
+            if sc.adv_noise_type == 'WAVE':
+                box.prop(sc, "adv_noise_wave_distortion")
+            elif sc.adv_noise_type == 'MUSGRAVE':
+                row = box.row(align=True)
+                row.prop(sc, "adv_noise_musgrave_detail")
+                row.prop(sc, "adv_noise_musgrave_roughness")
+            
             row = box.row(align=True)
             if sc.adv_noise_scale_linked:
                 row.prop(sc, "adv_noise_scale_master", text="Scale")
@@ -203,13 +210,20 @@ class ADVLIGHTING_PT_panel(bpy.types.Panel):
             row.prop(sc, "adv_noise_scale_linked", icon='LINKED' if sc.adv_noise_scale_linked else 'UNLINKED', text="")
             
             box.prop(sc, "adv_noise_contrast")
-            box.label(text="Motion")
+            
+            box.label(text="Motion & Rotation")
             row = box.row(); col = row.column(align=True)
             col.prop(sc, "adv_noise_direction", index=0, text="Flow X"); col.prop(sc, "adv_noise_direction", index=1, text="Flow Y"); col.prop(sc, "adv_noise_direction", index=2, text="Flow Z")
-            row.operator("advlighting.draw_noise_flow", icon='BRUSH_DATA', text="Draw")
+            col2 = row.column(align=True)
+            col2.operator("advlighting.draw_noise_flow", icon='BRUSH_DATA', text="Draw")
+            col2.operator("advlighting.align_noise_camera", icon='VIEW_CAMERA', text="Align")
             box.prop(sc, "adv_noise_speed")
             
-            # --- NEW UI LAYOUT ---
+            row = box.row(); col = row.column(align=True)
+            col.prop(sc, "adv_noise_rotation_axis", index=0, text="Rot Axis X"); col.prop(sc, "adv_noise_rotation_axis", index=1, text="Rot Axis Y"); col.prop(sc, "adv_noise_rotation_axis", index=2, text="Rot Axis Z")
+            box.prop(sc, "adv_noise_rotation_speed")
+            
+            # --- Fading ---
             box.label(text="Fading (Frames)")
             row1 = box.row(align=True)
             row1.prop(sc, "adv_noise_fade_in", text="Fade In")
@@ -225,6 +239,45 @@ class ADVLIGHTING_PT_panel(bpy.types.Panel):
                 box.template_color_ramp(ng.nodes["Ramp"], "color_ramp")
             else: 
                 box.operator("advlighting.create_noise_nodegroup", text="Create Ramp")
+
+        elif tp == 'GOBO':
+            box.label(text="Gobo Projection", icon='LIGHT_SPOT')
+            
+            row = box.row(align=True)
+            row.prop(sc, "adv_gobo_image", text="")
+            row.operator("advlighting.load_gobo_image", icon='FILEBROWSER', text="")
+            
+            row = box.row(align=True)
+            row.operator("advlighting.spawn_gobo_camera", icon='ADD', text="Spawn Camera")
+            row.operator("advlighting.remove_gobo_cameras", icon='TRASH', text="Clear All")
+            
+            if sc.adv_gobo_camera:
+                box.prop(sc, "adv_gobo_camera", text="Active")
+                
+            box.prop(sc, "adv_gobo_invert")
+            
+            # --- NEW UI SECTION ---
+            box.label(text="Motion & Rotation", icon='DRIVER_TRANSFORM')
+            row = box.row(align=True)
+            row.prop(sc, "adv_gobo_pos_dir", index=0, text="Dir X")
+            row.prop(sc, "adv_gobo_pos_dir", index=1, text="Dir Y")
+            
+            row = box.row(align=True)
+            row.prop(sc, "adv_gobo_pos_speed", text="Pos Speed")
+            row.prop(sc, "adv_gobo_pos_mode", text="")
+            
+            row = box.row(align=True)
+            row.prop(sc, "adv_gobo_rot_speed", text="Rot Speed")
+            row.prop(sc, "adv_gobo_rot_mode", text="")
+            box.separator()
+            # ----------------------
+            
+            box.label(text="Mask to Color Mapping")
+            ng = bpy.data.node_groups.get("AdvLightingGoboRamp")
+            if ng and "Ramp" in ng.nodes: 
+                box.template_color_ramp(ng.nodes["Ramp"], "color_ramp")
+            else: 
+                box.operator("advlighting.create_gobo_nodegroup", text="Create Ramp")
 
         elif tp in {'GRADIENT', 'OFFSET'}:
             box.prop(sc, "adv_gradient_mode", text="Mode")
@@ -270,6 +323,8 @@ class ADVLIGHTING_PT_panel(bpy.types.Panel):
             box.prop(sc, "adv_movie_step")
 
         box.operator("advlighting.apply_effectors", text="Apply")
+
+        
         
         # --- FORMATIONS ---
         box = main_col.box()

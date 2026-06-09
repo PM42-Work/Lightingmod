@@ -1,31 +1,70 @@
 import bpy
 import mathutils
 import concurrent.futures
+import math
+import numpy as np
 
 # --- THE PURE MATH WORKER ---
 def process_drone_math(task_data):
-    (drone_idx, num_frames, start, end, sx, sy, sz, dir_v, speed, contrast, 
-     noise_type, fade_in, fade_out, fade_in_mode, fade_out_mode, positions, color_lut) = task_data
+    (drone_idx, num_frames, start, end, sx, sy, sz, dir_v, speed, 
+     rot_axis, rot_speed, contrast, noise_type, wave_dist, mus_det, mus_rough,
+     fade_in, fade_out, fade_in_mode, fade_out_mode, 
+     positions, swarm_centers, base_start, base_end, color_lut) = task_data
 
-    r_data = [0.0] * (num_frames * 2)
-    g_data = [0.0] * (num_frames * 2)
-    b_data = [0.0] * (num_frames * 2)
+    raw_colors = []
+    
+    rot_axis_vec = mathutils.Vector(rot_axis)
+    if rot_axis_vec.length > 0: rot_axis_vec.normalize()
+    else: rot_axis_vec = mathutils.Vector((0,0,1))
+    
+    frame_range = max(1, end - start)
 
     for frame_idx, f in enumerate(range(start, end + 1)):
         px, py, pz = positions[frame_idx]
+        cx, cy, cz = swarm_centers[frame_idx]
         
-        # --- 1. Calculate Noise Coordinates (with XYZ Scaling) ---
+        # --- 1. Base Plate & Local Swarm Centering ---
+        t_frame = (f - start) / frame_range
+        current_base = [
+            base_start[0] * (1.0 - t_frame) + base_end[0] * t_frame,
+            base_start[1] * (1.0 - t_frame) + base_end[1] * t_frame,
+            base_start[2] * (1.0 - t_frame) + base_end[2] * t_frame
+        ]
+        
+        local_pos = mathutils.Vector((px - cx, py - cy, pz - cz))
+        
+        # --- 2. Swarm Rotation & Translation ---
+        if rot_speed != 0.0:
+            angle = rot_speed * (f / 24.0)
+            quat = mathutils.Quaternion(rot_axis_vec, angle)
+            local_pos = quat @ local_pos
+            
+        world_pos = local_pos + mathutils.Vector((cx, cy, cz))
         time_offset = dir_v * speed * (f / 24.0)
-        cx = (px + time_offset.x) * sx
-        cy = (py + time_offset.y) * sy
-        cz = (pz + time_offset.z) * sz
-        sample_coord = mathutils.Vector((cx, cy, cz))
         
+        sample_x = (world_pos.x + time_offset.x) * sx
+        sample_y = (world_pos.y + time_offset.y) * sy
+        sample_z = (world_pos.z + time_offset.z) * sz
+        sample_coord = mathutils.Vector((sample_x, sample_y, sample_z))
+        
+        # --- 3. Noise Generations ---
         if noise_type == 'PERLIN':
             noise_val = (mathutils.noise.noise(sample_coord) + 1.0) / 2.0 
         elif noise_type == 'VORONOI':
             distances, _ = mathutils.noise.voronoi(sample_coord)
             noise_val = distances[0] 
+        elif noise_type == 'CELL':
+            noise_val = mathutils.noise.cell(sample_coord)
+        elif noise_type == 'WAVE':
+            if wave_dist > 0.0:
+                dist_val = mathutils.noise.noise(sample_coord) * wave_dist
+                sample_coord.x += dist_val
+                sample_coord.y += dist_val
+                sample_coord.z += dist_val
+            noise_val = (math.sin(sample_coord.x * 10.0) + 1.0) / 2.0
+        elif noise_type == 'MUSGRAVE':
+            val = mathutils.noise.hetero_terrain(sample_coord, 1.0, mus_rough, mus_det, 1.0)
+            noise_val = max(0.0, min(1.0, val / 2.0))
         
         if contrast > 0:
             mid = 0.5; factor = 1.0 + (contrast * 10.0)
@@ -33,34 +72,43 @@ def process_drone_math(task_data):
         else:
             noise_val = max(0.0, min(1.0, noise_val))
         
-        # --- 2. Temporal Mask Offset ---
+        # --- 4. Exact Replacement & Fade Masking ---
         offset = 0.0
         if fade_in > 0 and f <= start + fade_in:
             t = (f - start) / fade_in
             smooth_t = t * t * (3.0 - 2.0 * t)
-            if fade_in_mode == 'BLACK':
-                offset = smooth_t - 1.0
-            else: # WHITE
-                offset = 1.0 - smooth_t
+            offset = (smooth_t - 1.0) if fade_in_mode == 'BLACK' else (1.0 - smooth_t)
         elif fade_out > 0 and f >= end - fade_out:
             t = (end - f) / fade_out
             smooth_t = t * t * (3.0 - 2.0 * t)
-            if fade_out_mode == 'BLACK':
-                offset = smooth_t - 1.0
-            else: # WHITE
-                offset = 1.0 - smooth_t
+            offset = (smooth_t - 1.0) if fade_out_mode == 'BLACK' else (1.0 - smooth_t)
                 
         noise_val = max(0.0, min(1.0, noise_val + offset))
-        
-        # --- 3. LUT Lookup & Exact Replacement ---
         final_color = color_lut[int(noise_val * 999)]
-            
-        data_idx = frame_idx * 2
-        r_data[data_idx] = f; r_data[data_idx + 1] = final_color[0]
-        g_data[data_idx] = f; g_data[data_idx + 1] = final_color[1]
-        b_data[data_idx] = f; b_data[data_idx + 1] = final_color[2]
+        raw_colors.append(final_color)
 
-    return drone_idx, r_data, g_data, b_data
+    # --- 5. RDP Simplification ---
+    from ... import utils
+    frames_arr = np.array(list(range(start, end + 1)), dtype=np.float32)
+    col_arr = np.array(raw_colors, dtype=np.float32)
+    
+    # OPTIMIZATION: Loosened tolerance from 0.01 to 0.05 to prevent extreme recursive recursion on noisy curves
+    critical_idx = utils.find_critical_indices(col_arr)
+    final_f_list, final_v_list = [], []
+    for k in range(len(critical_idx) - 1):
+        start_i, end_i = critical_idx[k], critical_idx[k+1]
+        sf, sv = utils.rdp_simplify(frames_arr[start_i:end_i+1], col_arr[start_i:end_i+1], 0.05)
+        if k > 0:
+            final_f_list.extend(sf[1:])
+            final_v_list.append(sv[1:])
+        else:
+            final_f_list.extend(sf)
+            final_v_list.append(sv)
+            
+    final_frames = np.array(final_f_list) if final_v_list else frames_arr
+    final_vals = np.vstack(final_v_list) if final_v_list else col_arr
+    
+    return drone_idx, final_frames.tolist(), final_vals.tolist()
 
 
 class ADVLIGHTING_OT_noise_effector(bpy.types.Operator):
@@ -90,41 +138,58 @@ class ADVLIGHTING_OT_noise_effector(bpy.types.Operator):
         if not ng or "Ramp" not in ng.nodes: return {'CANCELLED'}
         color_lut = [list(ng.nodes["Ramp"].color_ramp.evaluate(i / 999.0))[:3] for i in range(1000)]
 
-        # --- Resolve Vector Scaling ---
-        if sc.adv_noise_scale_linked:
-            sx = sy = sz = sc.adv_noise_scale_master
-        else:
-            sx, sy, sz = sc.adv_noise_scale_xyz
+        if sc.adv_noise_scale_linked: sx = sy = sz = sc.adv_noise_scale_master
+        else: sx, sy, sz = sc.adv_noise_scale_xyz
 
         dir_v = mathutils.Vector(sc.adv_noise_direction)
         speed = sc.adv_noise_speed; contrast = sc.adv_noise_contrast
         noise_type = sc.adv_noise_type; fade_in = sc.adv_noise_fade_in; fade_out = sc.adv_noise_fade_out
+        
+        wave_dist = sc.adv_noise_wave_distortion
+        mus_det = sc.adv_noise_musgrave_detail
+        mus_rough = sc.adv_noise_musgrave_roughness
+        rot_axis = sc.adv_noise_rotation_axis
+        rot_speed = sc.adv_noise_rotation_speed
 
         wm = context.window_manager
         wm.progress_begin(0, len(valid_drones))
+        
+        # --- OPTIMIZATION: Ultra-fast Numpy Swarm Centering ---
+        drone_positions = []
+        for o in valid_drones:
+            px, py, pz = o["Absolute_Position"]
+            anim = getattr(o, "animation_data", None)
+            pos_fc = [anim.action.fcurves.find('["Absolute_Position"]', index=i) if anim and anim.action else None for i in range(3)]
+            
+            pts = []
+            for f in range(start, end + 1):
+                x = pos_fc[0].evaluate(f) if pos_fc[0] else px
+                y = pos_fc[1].evaluate(f) if pos_fc[1] else py
+                z = pos_fc[2].evaluate(f) if pos_fc[2] else pz
+                pts.append((x,y,z))
+            drone_positions.append(pts)
 
+        # Replaced the slow python loop with C-compiled Numpy averaging
+        dp_np = np.array(drone_positions, dtype=np.float32)
+        swarm_centers = np.mean(dp_np, axis=0).tolist() if len(dp_np) > 0 else [[0.0, 0.0, 0.0]] * num_frames
+
+        # --- Dispatch Tasks ---
         tasks = []
         for drone_idx, o in enumerate(valid_drones):
-            wm.progress_update(drone_idx) 
-            
             anim = getattr(o, "animation_data", None)
-            
-            # --- EXTRACT POSITIONS ---
-            positions = []
-            px, py, pz = o["Absolute_Position"]
-            pos_fcurves = [None, None, None]
+            col_fcurves = [None, None, None]
             if anim and anim.action:
-                pos_fcurves = [anim.action.fcurves.find('["Absolute_Position"]', index=i) for i in range(3)]
+                col_fcurves = [anim.action.fcurves.find(f'["{prop_name}"]', index=i) for i in range(3)]
                 
-            for f in range(start, end + 1):
-                cur_px = pos_fcurves[0].evaluate(f) if pos_fcurves[0] else px
-                cur_py = pos_fcurves[1].evaluate(f) if pos_fcurves[1] else py
-                cur_pz = pos_fcurves[2].evaluate(f) if pos_fcurves[2] else pz
-                positions.append((cur_px, cur_py, cur_pz))
+            default_col = list(o.get(prop_name, [0.0, 0.0, 0.0, 1.0]))[:3]
+            base_start = [col_fcurves[i].evaluate(start) if col_fcurves[i] else default_col[i] for i in range(3)]
+            base_end = [col_fcurves[i].evaluate(end) if col_fcurves[i] else default_col[i] for i in range(3)]
                 
             tasks.append((
-                drone_idx, num_frames, start, end, sx, sy, sz, dir_v, speed, contrast, 
-                noise_type, fade_in, fade_out, sc.adv_noise_fade_in_mode, sc.adv_noise_fade_out_mode, positions, color_lut
+                drone_idx, num_frames, start, end, sx, sy, sz, dir_v, speed, 
+                rot_axis, rot_speed, contrast, noise_type, wave_dist, mus_det, mus_rough, 
+                fade_in, fade_out, sc.adv_noise_fade_in_mode, sc.adv_noise_fade_out_mode, 
+                drone_positions[drone_idx], swarm_centers, base_start, base_end, color_lut
             ))
 
         results = []
@@ -132,8 +197,8 @@ class ADVLIGHTING_OT_noise_effector(bpy.types.Operator):
             for result in executor.map(process_drone_math, tasks):
                 results.append(result)
 
-        wm.progress_begin(0, len(valid_drones)) 
-        for drone_idx, r_data, g_data, b_data in results:
+        # --- Write Simplified RDP Keyframes ---
+        for drone_idx, final_frames, final_vals in results:
             wm.progress_update(drone_idx)
             o = valid_drones[drone_idx]
             
@@ -141,28 +206,23 @@ class ADVLIGHTING_OT_noise_effector(bpy.types.Operator):
             if not o.animation_data: o.animation_data_create()
             if not o.animation_data.action: o.animation_data.action = bpy.data.actions.new(name=f"{o.name}_Anim")
             
-            fcurves = []
             for i in range(3):
                 fc = o.animation_data.action.fcurves.find(f'["{prop_name}"]', index=i)
                 if not fc: fc = o.animation_data.action.fcurves.new(f'["{prop_name}"]', index=i)
-                fcurves.append(fc)
-
-            for i, fc in enumerate(fcurves):
-                curve_data = {p.co[0]: p.co[1] for p in fc.keyframe_points}
-                new_data = r_data if i == 0 else (g_data if i == 1 else b_data)
-                for j in range(num_frames):
-                    curve_data[new_data[j * 2]] = new_data[j * 2 + 1]
-                    
-                sorted_frames = sorted(curve_data.keys())
-                flat_data = [0.0] * (len(sorted_frames) * 2)
-                for j, f in enumerate(sorted_frames):
-                    flat_data[j * 2] = f; flat_data[j * 2 + 1] = curve_data[f]
-                    
                 fc.keyframe_points.clear()
-                fc.keyframe_points.add(len(sorted_frames))
-                fc.keyframe_points.foreach_set('co', flat_data)
+                
+                pts = np.column_stack((final_frames, np.array(final_vals)[:, i]))
+                num_points = len(pts)
+                fc.keyframe_points.add(num_points)
+                fc.keyframe_points.foreach_set('co', pts.flatten())
                 fc.update()
+                
+                # OPTIMIZATION: Blazing fast C-level deselection instead of a Python for-loop
+                bool_arr = [False] * num_points
+                fc.keyframe_points.foreach_set('select_control_point', bool_arr)
+                fc.keyframe_points.foreach_set('select_left_handle', bool_arr)
+                fc.keyframe_points.foreach_set('select_right_handle', bool_arr)
 
         wm.progress_end()
-        self.report({'INFO'}, "Absolute Overwrite Noise Baked Successfully!")
+        self.report({'INFO'}, "Organic Smart-Rotated Noise Baked Successfully!")
         return {'FINISHED'}

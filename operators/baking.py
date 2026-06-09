@@ -19,39 +19,6 @@ class ADVLIGHTING_OT_set_bake_end(bpy.types.Operator):
         context.scene.adv_bake_end = context.scene.frame_current
         return{'FINISHED'}
 
-# --- COLOR BAKING HELPERS ---
-def find_critical_indices(values):
-    n = len(values)
-    if n < 3: return np.arange(n)
-    diffs = np.diff(values, axis=0)
-    signs = np.sign(diffs)
-    sign_change = signs[:-1] != signs[1:]
-    any_sign_change = np.any(sign_change, axis=1)
-    turning_points = np.where(any_sign_change)[0] + 1
-    return np.unique(np.concatenate(([0], turning_points, [n-1])))
-
-def rdp_simplify(frames, values, epsilon):
-    if len(frames) < 3: return frames, values
-    start_f, end_f = frames[0], frames[-1]
-    start_v, end_v = values[0], values[-1]
-    dx = end_f - start_f
-    if dx == 0:
-        dists = np.zeros(len(frames))
-    else:
-        t = (frames - start_f) / dx
-        expected_v = start_v + t[:, np.newaxis] * (end_v - start_v)
-        dists = np.linalg.norm(values - expected_v, axis=1)
-
-    dmax = dists.max()
-    index = dists.argmax()
-
-    if dmax > epsilon:
-        res1_f, res1_v = rdp_simplify(frames[:index+1], values[:index+1], epsilon)
-        res2_f, res2_v = rdp_simplify(frames[index:],   values[index:],   epsilon)
-        return np.concatenate((res1_f[:-1], res2_f)), np.vstack((res1_v[:-1], res2_v))
-    else:
-        return np.array([start_f, end_f]), np.vstack((start_v, end_v))
-
 # --- COLOR BAKING OPERATOR ---
 class ADVLIGHTING_OT_bake_colors(bpy.types.Operator):
     bl_idname = "advlighting.bake_colors"
@@ -155,11 +122,11 @@ class ADVLIGHTING_OT_bake_colors(bpy.types.Operator):
             col_arr = np.array(color_data, dtype=np.float32) / 255.0
                 
             if self.tolerance > 0.0:
-                critical_idx = find_critical_indices(col_arr)
+                critical_idx = utils.find_critical_indices(col_arr)
                 final_f_list, final_v_list = [], []
                 for k in range(len(critical_idx) - 1):
                     start_i, end_i = critical_idx[k], critical_idx[k+1]
-                    sf, sv = rdp_simplify(frames_arr[start_i:end_i+1], col_arr[start_i:end_i+1], self.tolerance)
+                    sf, sv = utils.rdp_simplify(frames_arr[start_i:end_i+1], col_arr[start_i:end_i+1], self.tolerance)
                     if k > 0:
                         final_f_list.extend(sf[1:])
                         final_v_list.append(sv[1:])
@@ -198,12 +165,17 @@ class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
         prop_name = "Absolute_Position" 
         data_path = f'["{prop_name}"]'
 
+        # --- OPTIMIZATION: Pre-Cache Constraint Lookups ---
+        drone_configs = []
         for d in drones:
-            d[prop_name] = [0.0, 0.0, 0.0]
-            ui = d.id_properties_ui(prop_name)
-            ui.update(subtype='TRANSLATION')
+            if prop_name not in d:
+                d[prop_name] = [0.0, 0.0, 0.0]
+                ui = d.id_properties_ui(prop_name)
+                ui.update(subtype='TRANSLATION')
+            
+            cons = sorted([c for c in d.constraints if c.type == 'COPY_LOCATION' and c.name.lower().startswith('copy done')], key=lambda c: c.name)
+            drone_configs.append((d, cons))
 
-        # Generate smart frame bounds from constraint keys
         frames_to_bake = set(range(sc.adv_bake_start, sc.adv_bake_end + 1))
         for d in drones:
             if d.animation_data and d.animation_data.action:
@@ -212,21 +184,18 @@ class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
                         for kp in fc.keyframe_points:
                             frames_to_bake.add(int(kp.co[0]))
                             
-        sorted_frames = sorted(list(frames_to_bake))
+        sorted_frames = sorted(list(frames_to_bake))[::5]
+        sampled_data = {d.name: [] for d in drones}
 
         wm = context.window_manager
         wm.progress_begin(0, len(sorted_frames))
-        sampled_data = {d.name: [] for d in drones}
-
-        def get_influences(drone):
-            return sorted([c for c in drone.constraints if c.type == 'COPY_LOCATION' and c.name.lower().startswith('copy done')], key=lambda c: c.name)
 
         for p_idx, f in enumerate(sorted_frames):
             sc.frame_set(f)
-            for d in drones:
-                cons = get_influences(d)
+            for d, cons in drone_configs:
                 active_idxs = [i for i, c in enumerate(cons) if getattr(c, "influence", 0.0) > 1e-6]
 
+                # Condition A: No active constraints (Takes location keyframes as is)
                 if not active_idxs:
                     p = d.matrix_world.translation
                     sampled_data[d.name].append((f, p.x, p.y, p.z))
@@ -235,46 +204,65 @@ class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
                 curr_idx = max(active_idxs)
                 c_curr = cons[curr_idx]
                 inf_curr = getattr(c_curr, "influence", 0.0)
-                tgt_curr = getattr(c_curr, "target", None)
-                empty_curr = tgt_curr if tgt_curr and getattr(tgt_curr, "type", "") == 'EMPTY' else None
 
-                if inf_curr >= 1.0 - 1e-6 and empty_curr is not None:
-                    p = empty_curr.matrix_world.translation
+                # Condition B: 100% Influence
+                if inf_curr >= 1.0 - 1e-6:
+                    tgt = getattr(c_curr, "target", None)
+                    p = d.matrix_world.translation # Fallback
+                    
+                    if tgt and tgt.type == 'EMPTY':
+                        # Extract the exact World Matrix of the Vertex if parented to a Mesh Vertex
+                        if tgt.parent and tgt.parent_type == 'VERTEX' and tgt.parent.type == 'MESH':
+                            v_idx = tgt.parent_vertices[0]
+                            v_local_co = tgt.parent.data.vertices[v_idx].co
+                            p = tgt.parent.matrix_world @ v_local_co
+                        else:
+                            p = tgt.matrix_world.translation
+                            
                     sampled_data[d.name].append((f, p.x, p.y, p.z))
+                    
+                # Condition C: Crossfading (0 < influence < 1)
                 else:
-                    if curr_idx > 0:
-                        prev_tgt = getattr(cons[curr_idx-1], "target", None)
-                        prev_empty = prev_tgt if prev_tgt and getattr(prev_tgt, "type", "") == 'EMPTY' else None
-                        p0 = prev_empty.matrix_world.translation if prev_empty else d.matrix_world.translation
-                    else:
-                        p0 = d.matrix_world.translation
-                        
-                    p1 = empty_curr.matrix_world.translation if empty_curr else d.matrix_world.translation
-                    a = max(0.0, min(1.0, inf_curr))
-                    x = (1.0 - a) * p0.x + a * p1.x
-                    y = (1.0 - a) * p0.y + a * p1.y
-                    z = (1.0 - a) * p0.z + a * p1.z
-                    sampled_data[d.name].append((f, x, y, z))
+                    pass # DO NOTHING. No keyframes are recorded.
+
             if p_idx % 10 == 0: wm.progress_update(p_idx)
 
+        # Write Keyframes & Force LINEAR
         for d_name, data in sampled_data.items():
+            if not data: continue
             d = bpy.data.objects.get(d_name)
+            
             if not d.animation_data: d.animation_data_create()
             if not d.animation_data.action: d.animation_data.action = bpy.data.actions.new(name=f"{d.name}Action")
             act = d.animation_data.action
+            
             data_np = np.array(data, dtype=np.float32)
             frames_arr = data_np[:, 0]
+            
             for i in range(3):
                 fc = act.fcurves.find(data_path=data_path, index=i)
                 if not fc: fc = act.fcurves.new(data_path=data_path, index=i)
                 fc.keyframe_points.clear()
+                
                 pts = np.column_stack((frames_arr, data_np[:, i+1]))
                 fc.keyframe_points.add(len(pts))
                 fc.keyframe_points.foreach_set('co', pts.flatten())
+                
+                # Condition D: Force all keyframes to be LINEAR and unselected
+                bool_arr = [False] * len(pts)
+                fc.keyframe_points.foreach_set('select_control_point', bool_arr)
+                fc.keyframe_points.foreach_set('select_left_handle', bool_arr)
+                fc.keyframe_points.foreach_set('select_right_handle', bool_arr)
+
+                for kp in fc.keyframe_points:
+                    kp.interpolation = 'LINEAR'
+                    
                 fc.update()
 
         wm.progress_end()
+        self.report({'INFO'}, "Smart Linear Positions Baked Successfully!")
         return {'FINISHED'}
+
 
 classes = (
     ADVLIGHTING_OT_set_bake_start, 

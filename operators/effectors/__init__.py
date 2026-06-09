@@ -1,4 +1,4 @@
-from . import gradient, sparkle, domain, movie, offset, management, temporal, noise
+from . import gradient, sparkle, domain, movie, offset, management, temporal, noise, gobo
 
 classes = (
     gradient.ADVLIGHTING_OT_draw_gradient,
@@ -10,18 +10,24 @@ classes = (
     domain.ADVLIGHTING_OT_domain_effector,
     
     movie.ADVLIGHTING_OT_movie_sampler,
-    # (generate_uv was removed from here)
     
     offset.ADVLIGHTING_OT_draw_offset_line,
     offset.ADVLIGHTING_OT_offset_keyframes,
     
+    # --- GOBO ---
+    management.ADVLIGHTING_OT_create_gobo_nodegroup,
+    gobo.ADVLIGHTING_OT_load_gobo_image,
+    gobo.ADVLIGHTING_OT_spawn_gobo_camera,
+    gobo.ADVLIGHTING_OT_remove_gobo_cameras,
+    gobo.ADVLIGHTING_OT_apply_gobo,
+    
     management.ADVLIGHTING_OT_apply_effectors,
-    management.ADVLIGHTING_OT_sample_drone_colors, # <--- Added!
+    management.ADVLIGHTING_OT_sample_drone_colors, 
     management.ADVLIGHTING_OT_effector_color_add,
     management.ADVLIGHTING_OT_effector_color_remove,
     management.ADVLIGHTING_OT_effector_monochrome,
-    management.ADVLIGHTING_OT_set_effector_start,
-    management.ADVLIGHTING_OT_set_effector_end, 
+    management.ADVLIGHTING_OT_set_effector_start, 
+    management.ADVLIGHTING_OT_set_effector_end,   
     management.ADVLIGHTING_OT_spark_profile_add,
     management.ADVLIGHTING_OT_spark_profile_remove,
     
@@ -31,6 +37,7 @@ classes = (
 
     management.ADVLIGHTING_OT_create_noise_nodegroup,
     management.ADVLIGHTING_OT_draw_noise_flow,
+    management.ADVLIGHTING_OT_align_noise_camera,
 
     noise.ADVLIGHTING_OT_noise_effector,
 )

@@ -1,6 +1,7 @@
 import bpy
 import math
 import re
+import numpy as np
 
 last_batch_history = {}
 baked_colors = {}
@@ -10,6 +11,39 @@ BLEND_MAP = {
     'REPLACE':'MIX','MIX':'MIX','ADD':'ADD','SUBTRACT':'SUBTRACT',
     'MULTIPLY':'MULTIPLY','LIGHTEN':'LIGHTEN','DARKEN':'DARKEN','SCREEN':'SCREEN',
 }
+
+# --- Curve Simplification (RDP) Math ---
+def find_critical_indices(values):
+    n = len(values)
+    if n < 3: return np.arange(n)
+    diffs = np.diff(values, axis=0)
+    signs = np.sign(diffs)
+    sign_change = signs[:-1] != signs[1:]
+    any_sign_change = np.any(sign_change, axis=1)
+    turning_points = np.where(any_sign_change)[0] + 1
+    return np.unique(np.concatenate(([0], turning_points, [n-1])))
+
+def rdp_simplify(frames, values, epsilon):
+    if len(frames) < 3: return frames, values
+    start_f, end_f = frames[0], frames[-1]
+    start_v, end_v = values[0], values[-1]
+    dx = end_f - start_f
+    if dx == 0:
+        dists = np.zeros(len(frames))
+    else:
+        t = (frames - start_f) / dx
+        expected_v = start_v + t[:, np.newaxis] * (end_v - start_v)
+        dists = np.linalg.norm(values - expected_v, axis=1)
+
+    dmax = dists.max()
+    index = dists.argmax()
+
+    if dmax > epsilon:
+        res1_f, res1_v = rdp_simplify(frames[:index+1], values[:index+1], epsilon)
+        res2_f, res2_v = rdp_simplify(frames[index:],   values[index:],   epsilon)
+        return np.concatenate((res1_f[:-1], res2_f)), np.vstack((res1_v[:-1], res2_v))
+    else:
+        return np.array([start_f, end_f]), np.vstack((start_v, end_v))
 
 # --- Layer Mixing Helpers ---
 def blend_colors(base, top, mode, fac):
@@ -86,10 +120,12 @@ def set_editor_filter_for_layer(context, prop_name: str):
                     ds.filter_text = prop_name
                 area.tag_redraw()
 
-# --- Nodes ---
+# --- Nodes (Persistent Fix added: use_fake_user = True) ---
 def ensure_gradient_nodegroup():
     ng = bpy.data.node_groups.get("AdvLightingGradient")
-    if not ng: ng = bpy.data.node_groups.new("AdvLightingGradient", 'ShaderNodeTree')
+    if not ng: 
+        ng = bpy.data.node_groups.new("AdvLightingGradient", 'ShaderNodeTree')
+        ng.use_fake_user = True
     if "Ramp" not in ng.nodes:
         ramp = ng.nodes.new('ShaderNodeValToRGB')
         ramp.name = "Ramp"; ramp.label = "Gradient Ramp"
@@ -98,7 +134,9 @@ def ensure_gradient_nodegroup():
 
 def ensure_gradient_preview_nodegroup():
     ng = bpy.data.node_groups.get("AdvLightingGradientPreview")
-    if not ng: ng = bpy.data.node_groups.new("AdvLightingGradientPreview", 'ShaderNodeTree')
+    if not ng: 
+        ng = bpy.data.node_groups.new("AdvLightingGradientPreview", 'ShaderNodeTree')
+        ng.use_fake_user = True
     if "Ramp" not in ng.nodes:
         ramp = ng.nodes.new('ShaderNodeValToRGB')
         ramp.name = "Ramp"; ramp.label = "Preview Ramp"
@@ -109,6 +147,7 @@ def ensure_noise_nodegroup():
     ng = bpy.data.node_groups.get("AdvLightingNoiseRamp")
     if not ng:
         ng = bpy.data.node_groups.new("AdvLightingNoiseRamp", 'ShaderNodeTree')
+        ng.use_fake_user = True
         ng.interface.new_socket(name="Value", in_out='INPUT', socket_type='NodeSocketFloat')
         ng.interface.new_socket(name="Color", in_out='OUTPUT', socket_type='NodeSocketColor')
         
@@ -174,3 +213,19 @@ def interpolate_oklch(color1, color2, t):
         
     L, C, H = l1*(1-t) + l2*t, c1*(1-t) + c2*t, h1*(1-t) + h2*t
     return oklch_to_rgb(L, C, H)
+
+def ensure_gobo_nodegroup():
+    ng = bpy.data.node_groups.get("AdvLightingGoboRamp")
+    if not ng:
+        ng = bpy.data.node_groups.new("AdvLightingGoboRamp", 'ShaderNodeTree')
+        ng.use_fake_user = True
+        ng.interface.new_socket(name="Value", in_out='INPUT', socket_type='NodeSocketFloat')
+        ng.interface.new_socket(name="Color", in_out='OUTPUT', socket_type='NodeSocketColor')
+        
+        ramp = ng.nodes.new('ShaderNodeValToRGB'); ramp.name = "Ramp"
+        ramp.color_ramp.color_mode = 'OKLAB'; ramp.color_ramp.interpolation = 'EASE'
+        
+        inp = ng.nodes.new('NodeGroupInput'); outp = ng.nodes.new('NodeGroupOutput')
+        ng.links.new(inp.outputs[0], ramp.inputs['Fac'])
+        ng.links.new(ramp.outputs['Color'], outp.inputs[0])
+    return ng
