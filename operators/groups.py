@@ -1,4 +1,6 @@
 import bpy
+import json
+import os
 from bpy.props import BoolProperty
 
 class ADVLIGHTING_OT_formation_add(bpy.types.Operator):
@@ -108,12 +110,153 @@ class ADVLIGHTING_OT_group_select(bpy.types.Operator):
             if obj:
                 obj.select_set(True)
         return {'FINISHED'}
+    
+class ADVLIGHTING_OT_write_groups_to_mesh(bpy.types.Operator):
+    bl_idname = "advlighting.write_groups_to_mesh"
+    bl_label = "Write Groups to Mesh"
+    bl_description = "Agnostically saves Formation JSON data to the Formation Meshes"
+    
+    def execute(self, context):
+        sc = context.scene
+        mesh_data_payloads = {} 
+        
+        # --- GET FILE PREFIX ---
+        blend_filename = bpy.path.basename(bpy.data.filepath)
+        prefix = os.path.splitext(blend_filename)[0] if blend_filename else "Untitled"
+        
+        # 1. Look at UI and Trace Constraint Hierarchy
+        for f in sc.adv_drone_formations:
+            # Prevent double-prefixing if the user re-exports from a master file
+            form_key = f.name if f.name.startswith(f"{prefix}_") else f"{prefix}_{f.name}"
+            
+            for g in f.groups:
+                for d_ref in g.drones:
+                    drone = bpy.data.objects.get(d_ref.object_name)
+                    if not drone: continue
+                    
+                    for c in drone.constraints:
+                        if c.type == 'COPY_LOCATION' and getattr(c, 'target', None):
+                            tgt = c.target
+                            
+                            if tgt.type == 'EMPTY':
+                                formation_obj = None
+                                
+                                if tgt.parent and tgt.parent.type == 'MESH':
+                                    formation_obj = tgt.parent
+                                else:
+                                    for ec in tgt.constraints:
+                                        if getattr(ec, 'target', None) and ec.target.type == 'MESH':
+                                            formation_obj = ec.target
+                                            break
+                                
+                                if formation_obj:
+                                    if formation_obj not in mesh_data_payloads: mesh_data_payloads[formation_obj] = {}
+                                    if form_key not in mesh_data_payloads[formation_obj]: mesh_data_payloads[formation_obj][form_key] = {}
+                                    if g.name not in mesh_data_payloads[formation_obj][form_key]: mesh_data_payloads[formation_obj][form_key][g.name] = []
+                                        
+                                    if tgt.name not in mesh_data_payloads[formation_obj][form_key][g.name]:
+                                        mesh_data_payloads[formation_obj][form_key][g.name].append(tgt.name)
+                                
+        # 2. Package JSON to Custom Properties
+        for obj, payload in mesh_data_payloads.items():
+            existing = {}
+            if "adv_group_metadata" in obj:
+                try: existing = json.loads(obj["adv_group_metadata"])
+                except: pass
+            existing.update(payload)
+            obj["adv_group_metadata"] = json.dumps(existing)
+            
+        self.report({'INFO'}, f"Wrote group JSON metadata to {len(mesh_data_payloads)} Formation Meshes.")
+        return {'FINISHED'}
 
+
+class ADVLIGHTING_OT_rebuild_groups_from_mesh(bpy.types.Operator):
+    bl_idname = "advlighting.rebuild_groups_from_mesh"
+    bl_label = "Rebuild Groups from Meshes"
+    bl_description = "Agnostically reads JSON metadata and timeline influence to reconstruct the UI"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        sc = context.scene
+        drones = [o for o in bpy.data.objects if o.get("md_sphere") and o.type=='MESH']
+        
+        formation_triggers = {} 
+        formation_payloads = {} 
+        
+        # 1. Reverse Lookup & Chronological Check
+        for d in drones:
+            for c in d.constraints:
+                if c.type == 'COPY_LOCATION' and getattr(c, 'target', None):
+                    tgt = c.target
+                    
+                    if tgt.type == 'EMPTY':
+                        formation_obj = None
+                        
+                        # Apply the same Empty-to-Mesh detective logic
+                        if tgt.parent and tgt.parent.type == 'MESH':
+                            formation_obj = tgt.parent
+                        else:
+                            for ec in tgt.constraints:
+                                if getattr(ec, 'target', None) and ec.target.type == 'MESH':
+                                    formation_obj = ec.target
+                                    break
+                        
+                        if formation_obj and "adv_group_metadata" in formation_obj:
+                            try: meta = json.loads(formation_obj["adv_group_metadata"])
+                            except: continue
+                                
+                            trigger_frame = 999999
+                            if d.animation_data and d.animation_data.action:
+                                # --- FIXED: Strictly use the correct data path ---
+                                fc = d.animation_data.action.fcurves.find(f'constraints["{c.name}"].influence')
+                                if fc:
+                                    for kp in fc.keyframe_points:
+                                        if kp.co[1] > 0.99:
+                                            trigger_frame = min(trigger_frame, int(kp.co[0]))
+                                            
+                            for form_name, groups in meta.items():
+                                if form_name not in formation_triggers: formation_triggers[form_name] = trigger_frame
+                                else: formation_triggers[form_name] = min(formation_triggers[form_name], trigger_frame)
+                                    
+                                if form_name not in formation_payloads: formation_payloads[form_name] = {}
+                                    
+                                for grp_name, empties in groups.items():
+                                    if tgt.name in empties:
+                                        if grp_name not in formation_payloads[form_name]:
+                                            formation_payloads[form_name][grp_name] = []
+                                        if d.name not in formation_payloads[form_name][grp_name]:
+                                            formation_payloads[form_name][grp_name].append(d.name)
+        
+        # 2. Rebuild the UI 
+        sorted_forms = sorted(formation_payloads.keys(), key=lambda k: formation_triggers.get(k, 999999))
+        
+        for form_name in sorted_forms:
+            existing_f = next((f for f in sc.adv_drone_formations if f.name == form_name), None)
+            if not existing_f:
+                existing_f = sc.adv_drone_formations.add()
+                existing_f.name = form_name
+                
+            payload_groups = formation_payloads[form_name]
+            for grp_name, drone_names in payload_groups.items():
+                existing_g = next((g for g in existing_f.groups if g.name == grp_name), None)
+                if not existing_g:
+                    existing_g = existing_f.groups.add()
+                    existing_g.name = grp_name
+                    
+                for d_name in drone_names:
+                    if not any(d.object_name == d_name for d in existing_g.drones):
+                        d_item = existing_g.drones.add()
+                        d_item.object_name = d_name
+                        
+        self.report({'INFO'}, f"Successfully recovered and sorted {len(sorted_forms)} Formations!")
+        return {'FINISHED'}
+    
+    
 classes = (
     ADVLIGHTING_OT_formation_add, ADVLIGHTING_OT_formation_remove,
     ADVLIGHTING_OT_group_add, ADVLIGHTING_OT_group_remove,
     ADVLIGHTING_OT_group_add_selected, ADVLIGHTING_OT_group_remove_selected,
-    ADVLIGHTING_OT_group_select,
+    ADVLIGHTING_OT_group_select, ADVLIGHTING_OT_write_groups_to_mesh, ADVLIGHTING_OT_rebuild_groups_from_mesh,
 )
 
 def register():

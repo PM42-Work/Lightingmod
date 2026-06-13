@@ -19,11 +19,11 @@ class ADVLIGHTING_OT_set_bake_end(bpy.types.Operator):
         context.scene.adv_bake_end = context.scene.frame_current
         return{'FINISHED'}
 
-# --- COLOR BAKING OPERATOR ---
+# --- COLOR BAKING OPERATOR (VECTORIZED ENGINE) ---
 class ADVLIGHTING_OT_bake_colors(bpy.types.Operator):
     bl_idname = "advlighting.bake_colors"
     bl_label  = "Bake Colors"
-    bl_description = "Calculates all layers and bakes the final mix directly to md_layer_1"
+    bl_description = "Ultra-fast Vectorized color baking engine with safe timeline splicing"
     bl_options = {'REGISTER', 'UNDO'}
     
     tolerance: FloatProperty(name="Tolerance", default=0.02, min=0.0, max=1.0)
@@ -32,8 +32,10 @@ class ADVLIGHTING_OT_bake_colors(bpy.types.Operator):
         sc = context.scene
         start, end = sc.adv_bake_start, sc.adv_bake_end
         frames = list(range(start, end + 1))
+        num_frames = len(frames)
         utils.baked_colors.clear()
         
+        # 1. Pre-Cache Phase
         obj_fcurves = {}
         for o in bpy.data.objects:
             if not (o.get("md_sphere") and o.type == 'MESH'): continue
@@ -62,36 +64,63 @@ class ADVLIGHTING_OT_bake_colors(bpy.types.Operator):
 
         layer_configs = []
         for i, layer in enumerate(sc.adv_layers):
-            ops = [opacity_fcurves[i].evaluate(f) for f in frames] if i in opacity_fcurves else [layer.opacity] * len(frames)
+            ops = [opacity_fcurves[i].evaluate(f) for f in frames] if i in opacity_fcurves else [layer.opacity] * num_frames
             layer_configs.append({'idx': i, 'mute': layer.mute, 'solo': layer.solo, 'blend': layer.blend_mode, 'opacities': ops})
 
         any_solo = any(l['solo'] for l in layer_configs)
 
+        # 2. Vectorized Math Worker
         def bake_worker(obj_name, data_pack):
-            final_colors = []
             fc_map, initials = data_pack['fc_map'], data_pack['initials']
             
-            for f_idx, f in enumerate(frames):
-                if not layer_configs:
-                    final_colors.append((0,0,0))
-                    continue
+            def get_layer_data(lnum):
+                data = np.zeros((num_frames, 3), dtype=np.float32)
+                for ch in range(3):
+                    if lnum in fc_map and ch in fc_map[lnum]:
+                        data[:, ch] = [fc_map[lnum][ch].evaluate(f) for f in frames]
+                    else:
+                        data[:, ch] = initials[lnum][ch]
+                return data
                 
-                l0 = layer_configs[0]
-                enabled0 = (not l0['mute']) and (l0['solo'] or not any_solo)
-                base_col = [fc_map[1][ch].evaluate(f) if (1 in fc_map and ch in fc_map[1]) else initials[1][ch] for ch in range(3)] if enabled0 else [0.0]*3
-
-                for l_cfg in layer_configs[1:]:
-                    if not ((not l_cfg['mute']) and (l_cfg['solo'] or not any_solo)): continue
-                    fac = l_cfg['opacities'][f_idx]
-                    if fac <= 0.0001: continue
-                    
-                    lnum = l_cfg['idx'] + 1
-                    top = [fc_map[lnum][ch].evaluate(f) if (lnum in fc_map and ch in fc_map[lnum]) else initials[lnum][ch] for ch in range(3)]
-                    base_col = utils.blend_colors(base_col, top, l_cfg['blend'], fac)
+            if not layer_configs:
+                return obj_name, np.zeros((num_frames, 3), dtype=np.float32)
                 
-                final_colors.append(tuple(int(c * 255) for c in base_col))
-            return obj_name, final_colors
+            l0 = layer_configs[0]
+            enabled0 = (not l0['mute']) and (l0['solo'] or not any_solo)
+            if enabled0:
+                base_col = get_layer_data(1)
+            else:
+                base_col = np.zeros((num_frames, 3), dtype=np.float32)
 
+            for l_cfg in layer_configs[1:]:
+                if not ((not l_cfg['mute']) and (l_cfg['solo'] or not any_solo)): continue
+                
+                fac = np.array(l_cfg['opacities'], dtype=np.float32)
+                if np.max(fac) <= 0.0001: continue
+                
+                top_col = get_layer_data(l_cfg['idx'] + 1)
+                
+                b = np.clip(base_col, 0.0, 1.0)
+                t = np.clip(top_col, 0.0, 1.0)
+                fac_expanded = fac[:, np.newaxis]
+                mode = l_cfg['blend']
+                
+                if mode == 'REPLACE':
+                    alpha = np.clip(np.max(t, axis=1, keepdims=True), 0.0, 1.0)
+                    out = b * (1.0 - alpha) + t * alpha
+                elif mode == 'ADD':      out = np.clip(b + t, 0.0, 1.0)
+                elif mode == 'SUBTRACT': out = np.clip(b - t, 0.0, 1.0)
+                elif mode == 'MULTIPLY': out = b * t
+                elif mode == 'LIGHTEN':  out = np.maximum(b, t)
+                elif mode == 'DARKEN':   out = np.minimum(b, t)
+                elif mode == 'SCREEN':   out = 1.0 - (1.0 - b) * (1.0 - t)
+                else:                    out = t
+                
+                base_col = b * (1.0 - fac_expanded) + out * fac_expanded
+            
+            return obj_name, np.clip(base_col, 0.0, 1.0)
+
+        # 3. Multithreading Dispatch
         wm = context.window_manager
         wm.progress_begin(0, len(obj_fcurves))
         
@@ -103,23 +132,18 @@ class ADVLIGHTING_OT_bake_colors(bpy.types.Operator):
                 if i % 10 == 0: wm.progress_update(i)
         wm.progress_end()
         
+        # 4. RDP & Splicing 
         wm.progress_begin(0, len(utils.baked_colors))
         frames_arr = np.array(frames, dtype=np.float32)
         
-        for i, (obj_name, color_data) in enumerate(utils.baked_colors.items()):
+        for i, (obj_name, col_arr) in enumerate(utils.baked_colors.items()):
             o = bpy.data.objects.get(obj_name)
             if not o: continue
             
-            # Ensure target property exists
             if "md_layer_1" not in o: o["md_layer_1"] = [0.0, 0.0, 0.0, 1.0]
-            
             if not o.animation_data: o.animation_data_create()
             if not o.animation_data.action: o.animation_data.action = bpy.data.actions.new(name=f"{obj_name}_color")
             action = o.animation_data.action
-            
-            # Remove old fcurves from md_layer_1
-            for fc in [fc for fc in action.fcurves if fc.data_path == '["md_layer_1"]']: action.fcurves.remove(fc)
-            col_arr = np.array(color_data, dtype=np.float32) / 255.0
                 
             if self.tolerance > 0.0:
                 critical_idx = utils.find_critical_indices(col_arr)
@@ -138,17 +162,40 @@ class ADVLIGHTING_OT_bake_colors(bpy.types.Operator):
             else:
                 final_frames, final_vals = frames_arr, col_arr
             
-            for channel in range(3):
-                fc = action.fcurves.new(data_path='["md_layer_1"]', index=channel)
-                final_data = np.column_stack((final_frames, final_vals[:, channel]))
-                fc.keyframe_points.add(len(final_data))
-                fc.keyframe_points.foreach_set('co', final_data.flatten())
-                fc.update()
+            for target_path in ['["md_layer_1"]', 'color']:
+                for channel in range(3):
+                    fc = action.fcurves.find(data_path=target_path, index=channel)
+                    if not fc: 
+                        fc = action.fcurves.new(data_path=target_path, index=channel)
+                        existing_pts = np.empty((0, 2), dtype=np.float32)
+                    else:
+                        num_existing = len(fc.keyframe_points)
+                        if num_existing > 0:
+                            coords = np.zeros(num_existing * 2, dtype=np.float32)
+                            fc.keyframe_points.foreach_get('co', coords)
+                            existing_pts = coords.reshape((num_existing, 2))
+                            
+                            mask = (existing_pts[:, 0] < start) | (existing_pts[:, 0] > end)
+                            existing_pts = existing_pts[mask]
+                        else:
+                            existing_pts = np.empty((0, 2), dtype=np.float32)
+                    
+                    new_pts = np.column_stack((final_frames, final_vals[:, channel]))
+                    combined_pts = np.vstack((existing_pts, new_pts))
+                    combined_pts = combined_pts[combined_pts[:, 0].argsort()]
+                    
+                    fc.keyframe_points.clear() 
+                    num_points = len(combined_pts)
+                    fc.keyframe_points.add(num_points)
+                    fc.keyframe_points.foreach_set('co', combined_pts.flatten())
+                    fc.update()
+                
             if i % 50 == 0: wm.progress_update(i)
 
         wm.progress_end()
-        self.report({'INFO'}, "Master Mix baked to md_layer_1")
+        self.report({'INFO'}, "Master Mix baked to md_layer_1 & Viewport Color")
         return {'FINISHED'}
+
 
 # --- SMART BOUNDS POSITION BAKING ---
 class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
@@ -165,7 +212,6 @@ class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
         prop_name = "Absolute_Position" 
         data_path = f'["{prop_name}"]'
 
-        # --- OPTIMIZATION: Pre-Cache Constraint Lookups ---
         drone_configs = []
         for d in drones:
             if prop_name not in d:
@@ -195,7 +241,6 @@ class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
             for d, cons in drone_configs:
                 active_idxs = [i for i, c in enumerate(cons) if getattr(c, "influence", 0.0) > 1e-6]
 
-                # Condition A: No active constraints (Takes location keyframes as is)
                 if not active_idxs:
                     p = d.matrix_world.translation
                     sampled_data[d.name].append((f, p.x, p.y, p.z))
@@ -205,13 +250,11 @@ class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
                 c_curr = cons[curr_idx]
                 inf_curr = getattr(c_curr, "influence", 0.0)
 
-                # Condition B: 100% Influence
                 if inf_curr >= 1.0 - 1e-6:
                     tgt = getattr(c_curr, "target", None)
-                    p = d.matrix_world.translation # Fallback
+                    p = d.matrix_world.translation 
                     
                     if tgt and tgt.type == 'EMPTY':
-                        # Extract the exact World Matrix of the Vertex if parented to a Mesh Vertex
                         if tgt.parent and tgt.parent_type == 'VERTEX' and tgt.parent.type == 'MESH':
                             v_idx = tgt.parent_vertices[0]
                             v_local_co = tgt.parent.data.vertices[v_idx].co
@@ -220,14 +263,9 @@ class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
                             p = tgt.matrix_world.translation
                             
                     sampled_data[d.name].append((f, p.x, p.y, p.z))
-                    
-                # Condition C: Crossfading (0 < influence < 1)
-                else:
-                    pass # DO NOTHING. No keyframes are recorded.
 
             if p_idx % 10 == 0: wm.progress_update(p_idx)
 
-        # Write Keyframes & Force LINEAR
         for d_name, data in sampled_data.items():
             if not data: continue
             d = bpy.data.objects.get(d_name)
@@ -248,7 +286,6 @@ class ADVLIGHTING_OT_bake_positions(bpy.types.Operator):
                 fc.keyframe_points.add(len(pts))
                 fc.keyframe_points.foreach_set('co', pts.flatten())
                 
-                # Condition D: Force all keyframes to be LINEAR and unselected
                 bool_arr = [False] * len(pts)
                 fc.keyframe_points.foreach_set('select_control_point', bool_arr)
                 fc.keyframe_points.foreach_set('select_left_handle', bool_arr)
@@ -270,7 +307,9 @@ classes = (
     ADVLIGHTING_OT_bake_colors, 
     ADVLIGHTING_OT_bake_positions
 )
+
 def register():
     for cls in classes: bpy.utils.register_class(cls)
+
 def unregister():
     for cls in reversed(classes): bpy.utils.unregister_class(cls)

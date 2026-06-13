@@ -338,6 +338,13 @@ class ADVLIGHTING_PT_panel(bpy.types.Panel):
         # --- FORMATIONS ---
         box = main_col.box()
         box.label(text="Formations & Groups", icon='GROUP')
+        
+        # Add the two new Mesh Data Export/Import buttons side-by-side
+        row = box.row(align=True)
+        
+        row.operator("advlighting.write_groups_to_mesh", text="Export to Meshes", icon='EXPORT')
+        row.operator("advlighting.rebuild_groups_from_mesh", text="Recover Groups", icon='IMPORT')
+
         box.template_list("ADVLIGHTING_UL_formations", "", sc, "adv_drone_formations", sc, "adv_drone_formations_index", rows=2)
         row = box.row(align=True)
         row.operator("advlighting.formation_add", icon='ADD', text=""); row.operator("advlighting.formation_remove", icon='REMOVE', text="")
